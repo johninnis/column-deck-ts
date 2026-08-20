@@ -1,0 +1,156 @@
+import type { AssetLoader, ColumnServices, OuterColumnContext } from "./column-base.ts"
+import type { Column, ColumnKey, ColumnState } from "./column-state.ts"
+import type { ColumnShell } from "./column-shell.ts"
+import type { ColumnRegistry } from "./column-registry.ts"
+import { createColumnShell } from "./column-shell.ts"
+import { findColumn } from "./column-state.ts"
+import { applyColumnDataset } from "./column-dom.ts"
+import { ColumnLifecycleError } from "./errors.ts"
+
+type LaunchColumnFn = (type: string, entityId?: string | null, spawnedFrom?: ColumnKey | null) => Promise<string>
+
+interface ColumnCallbacks {
+  readonly onClose: () => void
+  readonly onRefresh: () => void
+  readonly onMenuSelect: (action: string) => Promise<void>
+  readonly onListSelect: (action: string, btn: HTMLButtonElement | null) => Promise<void>
+  readonly onListsOpen: () => Promise<void>
+  readonly onPinChange: (pinned: boolean) => void
+}
+
+interface ColumnRendererDeps<S extends ColumnServices = ColumnServices> {
+  readonly scrollContainer: HTMLElement
+  readonly assetLoader: AssetLoader
+  readonly columnRegistry: ColumnRegistry<S>
+  readonly getState: () => ColumnState
+  readonly onFocus: (key: ColumnKey) => void
+}
+
+interface ColumnRenderer<S extends ColumnServices = ColumnServices> {
+  readonly scrollToElement: (element: HTMLElement) => void
+  readonly focusColumn: (key: ColumnKey) => void
+  readonly mountColumnShell: (column: Column, callbacks: ColumnCallbacks) => ColumnShell
+  readonly syncColumnDataset: (column: Column) => void
+  readonly loadColumnContent: (column: Column, shell: ColumnShell, context: OuterColumnContext<S>) => Promise<void>
+  readonly removeColumnElements: (columns: ReadonlyArray<{ readonly key: ColumnKey }>) => void
+  readonly getElement: (key: ColumnKey) => HTMLElement | undefined
+  readonly getShell: (key: ColumnKey) => ColumnShell | undefined
+}
+
+const createColumnRenderer = <S extends ColumnServices = ColumnServices>({
+  scrollContainer,
+  assetLoader,
+  columnRegistry,
+  getState,
+  onFocus,
+}: ColumnRendererDeps<S>): ColumnRenderer<S> => {
+  const columnShells = new Map<ColumnKey, ColumnShell>()
+
+  const scrollToElement = (element: HTMLElement): void => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        element.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" })
+      })
+    })
+  }
+
+  const mountColumnShell = (
+    column: Column,
+    { onClose, onRefresh, onMenuSelect, onListSelect, onListsOpen, onPinChange }: ColumnCallbacks,
+  ): ColumnShell => {
+    const definition = columnRegistry.get(column.type)
+    if (!definition) {
+      throw new ColumnLifecycleError(`Unknown column type: ${column.type}`)
+    }
+
+    const shell = createColumnShell({
+      cloneTemplate: assetLoader.cloneTemplate,
+      title: definition.getTitle(column.entityId),
+      hasClose: definition.hasClose,
+      hasRefresh: definition.hasRefresh,
+      hasLists: definition.hasLists,
+      hasPin: definition.hasPin,
+      menuItems: definition.menuItems,
+      onClose,
+      onRefresh,
+      onMenuSelect,
+      onListSelect,
+      onListsOpen,
+      onPinChange,
+      onFocus: () => onFocus(column.key),
+      scrollContainer,
+    })
+
+    applyColumnDataset(shell.element, column)
+    columnShells.set(column.key, shell)
+
+    return shell
+  }
+
+  const syncColumnDataset = (column: Column): void => {
+    const shell = columnShells.get(column.key)
+    if (shell) applyColumnDataset(shell.element, column)
+  }
+
+  const loadColumnContent = async (
+    column: Column,
+    shell: ColumnShell,
+    context: OuterColumnContext<S>,
+  ): Promise<void> => {
+    const definition = columnRegistry.get(column.type)
+    if (!definition) return
+    await definition.loadAssets(assetLoader)
+    // The column may have been closed or the deck destroyed while assets loaded; onDestroy has
+    // already run for it, so rendering now would wire up work nothing will ever tear down.
+    if (columnShells.get(column.key) !== shell) return
+    await definition.render(shell.getContentElement(), context)
+  }
+
+  const removeColumnElements = (columns: ReadonlyArray<{ readonly key: ColumnKey }>): void => {
+    columns.forEach((col) => {
+      const shell = columnShells.get(col.key)
+      if (!shell) return
+      const column = findColumn(getState(), col.key)
+      const definition = column ? columnRegistry.get(column.type) : null
+      definition?.onDestroy(shell.getContentElement())
+      shell.element.remove()
+      shell.destroy()
+      columnShells.delete(col.key)
+    })
+  }
+
+  const getElement = (key: ColumnKey): HTMLElement | undefined => columnShells.get(key)?.element
+
+  const getShell = (key: ColumnKey): ColumnShell | undefined => columnShells.get(key)
+
+  const focusColumn = (key: ColumnKey): void => {
+    const shell = columnShells.get(key)
+    if (!shell) return
+    const header = shell.element.querySelector<HTMLElement>("header")
+    const heading = shell.element.querySelector<HTMLElement>("h2")
+    if (!header || !heading) return
+    columnShells.forEach((other) => {
+      const otherHeader = other.element.querySelector<HTMLElement>("header")
+      if (otherHeader) delete otherHeader.dataset.keyboardFocus
+    })
+    header.dataset.keyboardFocus = ""
+    heading.focus()
+    heading.addEventListener("blur", () => {
+      delete header.dataset.keyboardFocus
+    }, { once: true })
+  }
+
+  return Object.freeze({
+    scrollToElement,
+    focusColumn,
+    mountColumnShell,
+    syncColumnDataset,
+    loadColumnContent,
+    removeColumnElements,
+    getElement,
+    getShell,
+  })
+}
+
+export type { ColumnCallbacks, ColumnRenderer, ColumnRendererDeps, LaunchColumnFn }
+export { createColumnRenderer }
