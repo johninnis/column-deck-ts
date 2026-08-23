@@ -1,9 +1,9 @@
 import type { AssetLoader, ColumnDefinition, ColumnServices, OuterColumnContext } from "./column-base.ts"
-import type { Column, ColumnKey, ColumnState, CreateColumnParams } from "./column-state.ts"
+import type { Column, ColumnKey, ColumnRef, ColumnState, CreateColumnParams } from "./column-state.ts"
 import type { ColumnRegistry } from "./column-registry.ts"
 import type { ColumnShell } from "./column-shell.ts"
+import { resolveScrollRegion } from "./column-shell.ts"
 import type { ColumnCallbacks, ColumnRenderer, LaunchColumnFn } from "./column-renderer.ts"
-import type { MobileHistoryEntry } from "./column-history.ts"
 import {
   addColumn,
   createColumn,
@@ -18,7 +18,7 @@ import {
 import { createColumnRenderer } from "./column-renderer.ts"
 import type { ShellTemplate } from "./shell-template.ts"
 import { createColumnLazyLoader } from "./column-lazy-loader.ts"
-import { createClosedColumnsHistory } from "./column-history.ts"
+import { type ClosedColumnsHistory, recordClosed, takeLastClosed } from "./column-history.ts"
 import { createMobileNavigator } from "./column-mobile-nav.ts"
 import {
   applyLayoutOp,
@@ -37,11 +37,6 @@ interface ColumnAssetPaths {
   readonly templates: ReadonlyArray<string>
 }
 
-interface PinnedColumnDescriptor {
-  readonly type: string
-  readonly entityId: string | null
-}
-
 interface ColumnManagerDeps<S extends ColumnServices = ColumnServices> {
   readonly mountElement: HTMLElement
   readonly persistence: PersistenceAdapter
@@ -50,8 +45,8 @@ interface ColumnManagerDeps<S extends ColumnServices = ColumnServices> {
   readonly assetPaths?: ColumnAssetPaths
   readonly columnRegistry: ColumnRegistry<S>
   readonly isMobile: () => boolean
-  readonly initialMobileHistory?: ReadonlyArray<MobileHistoryEntry>
-  readonly onPinnedColumnsChange?: ((columns: ReadonlyArray<PinnedColumnDescriptor>) => void) | null
+  readonly initialMobileHistory?: ReadonlyArray<ColumnRef>
+  readonly onPinnedColumnsChange?: ((columns: ReadonlyArray<ColumnRef>) => void) | null
   readonly onMobileHistoryChange?: () => void
   readonly services: S
 }
@@ -69,7 +64,7 @@ interface ColumnManager {
   readonly getLastFocusedElement: () => HTMLElement | null
   readonly getState: () => ColumnState
   readonly getColumnCount: () => number
-  readonly getMobileHistory: () => ReadonlyArray<MobileHistoryEntry>
+  readonly getMobileHistory: () => ReadonlyArray<ColumnRef>
   readonly setPinned: (key: ColumnKey, pinned: boolean) => void
   readonly destroy: () => void
 }
@@ -93,15 +88,13 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
   services,
 }: ColumnManagerDeps<S>): ColumnManager => {
   let state: ColumnState = createColumnState()
-  const closedHistory = createClosedColumnsHistory()
-  const mobileHistory: Array<MobileHistoryEntry> = [...initialMobileHistory]
+  let closedHistory: ClosedColumnsHistory = []
 
   const renderer: ColumnRenderer<S> = createColumnRenderer({
     scrollContainer: mountElement,
     assetLoader,
     shellTemplate,
     columnRegistry,
-    getState: () => state,
     onFocus: (key) => {
       state = setLastFocused(state, key)
     },
@@ -147,7 +140,7 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
   }
 
   const closeAllColumns = (): void => {
-    renderer.removeColumnElements(state.columns)
+    renderer.destroyColumns(state.columns)
     state = createColumnState()
   }
 
@@ -180,6 +173,25 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
     applyLayoutOp(mountElement, planInsertion({ state, targetIndex, element, deps: layoutDeps }))
   }
 
+  const requireShell = (column: Column): ColumnShell => {
+    const shell = renderer.getShell(column.key)
+    if (!shell) throw new ColumnLifecycleError(`Column is not mounted: ${column.key}`)
+    return shell
+  }
+
+  const suspendColumn = (column: Column): number => {
+    const shell = requireShell(column)
+    const scrollTop = resolveScrollRegion(shell.getContentElement()).scrollTop
+    shell.element.remove()
+    return scrollTop
+  }
+
+  const restoreColumn = (column: Column, scrollTop: number): void => {
+    const shell = requireShell(column)
+    attachColumnElement(column, shell.element)
+    resolveScrollRegion(shell.getContentElement()).scrollTop = scrollTop
+  }
+
   const renderColumnWithCallbacks = async (column: Column, shouldScroll = false): Promise<HTMLElement> => {
     const shell = renderer.mountColumnShell(column, createColumnCallbacks(column))
     attachColumnElement(column, shell.element)
@@ -193,10 +205,13 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
     setState: (next) => {
       state = next
     },
-    mobileHistory,
+    initialHistory: initialMobileHistory,
     createColumn: (type, entityId) => buildColumn({ type, entityId }),
-    closeAllColumns,
     renderColumn: renderColumnWithCallbacks,
+    suspendColumn,
+    restoreColumn,
+    destroyColumns: renderer.destroyColumns,
+    closeAllColumns,
     focusColumn: renderer.focusColumn,
     onMobileHistoryChange,
   })
@@ -263,13 +278,13 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
     const closedColumn = state.columns[closedIndex]
     if (!closedColumn) return
 
-    closedHistory.record({
+    closedHistory = recordClosed(closedHistory, {
       type: closedColumn.type,
       entityId: closedColumn.entityId,
       afterKey: state.columns[closedIndex - 1]?.key ?? null,
     })
 
-    renderer.removeColumnElements([{ key }])
+    renderer.destroyColumns([closedColumn])
     state = removeColumn(state, key)
 
     const focusTarget = state.columns[closedIndex] ?? state.columns[closedIndex - 1]
@@ -280,8 +295,10 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
   }
 
   const undo = async (): Promise<void> => {
-    const last = closedHistory.takeLast()
-    if (!last) return
+    const taken = takeLastClosed(closedHistory)
+    if (!taken) return
+    closedHistory = taken.history
+    const last = taken.entry
 
     const afterExists = last.afterKey !== null && state.columns.some((c) => c.key === last.afterKey)
     const column = buildColumn({
@@ -375,6 +392,7 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
 
   const destroy = (): void => {
     lazyLoader.disconnect()
+    mobileNav.destroy()
     closeAllColumns()
   }
 
@@ -391,7 +409,7 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
     getLastFocusedElement,
     getState: () => state,
     getColumnCount: () => state.columns.length,
-    getMobileHistory: () => [...mobileHistory],
+    getMobileHistory: mobileNav.getHistory,
     setPinned: applyPinState,
     destroy,
   })

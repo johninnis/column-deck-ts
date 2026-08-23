@@ -31,9 +31,10 @@ const createDragHandler = ({ containerElement, onReorder, isMobile }: DragHandle
     originalIndex = getColumnIndex(column)
     column.dataset.dragging = ""
 
-    if (event.dataTransfer) {
+    const key = getColumnKeyFromElement(column)
+    if (event.dataTransfer && key !== null) {
       event.dataTransfer.effectAllowed = "move"
-      event.dataTransfer.setData("text/plain", getColumnKeyFromElement(column))
+      event.dataTransfer.setData("text/plain", key)
     }
   }
 

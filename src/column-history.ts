@@ -1,34 +1,25 @@
-import type { ColumnKey } from "./column-state.ts"
+import type { ColumnKey, ColumnRef } from "./column-state.ts"
+import { popLast } from "./immutable-list.ts"
 
-interface ClosedHistoryEntry {
-  readonly type: string
-  readonly entityId: string | null
+/** A closed column remembered for undo: what it was and which column it sat after. */
+interface ClosedHistoryEntry extends ColumnRef {
   readonly afterKey: ColumnKey | null
 }
 
-/** One step in the mobile back-stack: the column type and optional entity id to return to. */
-interface MobileHistoryEntry {
-  readonly type: string
-  readonly entityId: string | null
-}
-
-interface ClosedColumnsHistory {
-  readonly record: (entry: ClosedHistoryEntry) => void
-  readonly takeLast: () => ClosedHistoryEntry | undefined
-}
+/** Closed columns, oldest first, capped so undo never grows without bound. */
+type ClosedColumnsHistory = ReadonlyArray<ClosedHistoryEntry>
 
 const MAX_CLOSED_ENTRIES = 50
 
-const createClosedColumnsHistory = (): ClosedColumnsHistory => {
-  const stack: Array<ClosedHistoryEntry> = []
-  return Object.freeze({
-    record: (entry: ClosedHistoryEntry): void => {
-      stack.push(entry)
-      if (stack.length > MAX_CLOSED_ENTRIES) stack.shift()
-    },
-    takeLast: (): ClosedHistoryEntry | undefined => stack.pop(),
-  })
+const recordClosed = (history: ClosedColumnsHistory, entry: ClosedHistoryEntry): ClosedColumnsHistory =>
+  [...history, entry].slice(-MAX_CLOSED_ENTRIES)
+
+const takeLastClosed = (
+  history: ClosedColumnsHistory,
+): { readonly history: ClosedColumnsHistory; readonly entry: ClosedHistoryEntry } | null => {
+  const popped = popLast(history)
+  return popped ? { history: popped.rest, entry: popped.last } : null
 }
 
-export type { ClosedColumnsHistory, ClosedHistoryEntry, MobileHistoryEntry }
-export { createClosedColumnsHistory }
+export type { ClosedColumnsHistory, ClosedHistoryEntry }
+export { recordClosed, takeLastClosed }

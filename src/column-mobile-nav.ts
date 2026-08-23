@@ -1,14 +1,18 @@
-import type { Column, ColumnKey, ColumnState } from "./column-state.ts"
-import type { MobileHistoryEntry } from "./column-history.ts"
-import { addColumn } from "./column-state.ts"
+import type { Column, ColumnKey, ColumnRef, ColumnState } from "./column-state.ts"
+import type { MobileStack, StackChange, SuspendedEntry } from "./column-mobile-stack.ts"
+import { addColumn, createColumnState } from "./column-state.ts"
+import { clearStack, historyOf, popTop, seedStack, suspendOnto, unwindTo } from "./column-mobile-stack.ts"
 
 interface MobileNavigatorDeps {
   readonly getState: () => ColumnState
   readonly setState: (state: ColumnState) => void
-  readonly mobileHistory: Array<MobileHistoryEntry>
+  readonly initialHistory: ReadonlyArray<ColumnRef>
   readonly createColumn: (type: string, entityId: string | null) => Column
-  readonly closeAllColumns: () => void
   readonly renderColumn: (column: Column, shouldScroll?: boolean) => Promise<HTMLElement>
+  readonly suspendColumn: (column: Column) => number
+  readonly restoreColumn: (column: Column, scrollTop: number) => void
+  readonly destroyColumns: (columns: ReadonlyArray<Column>) => void
+  readonly closeAllColumns: () => void
   readonly focusColumn: (key: ColumnKey) => void
   readonly onMobileHistoryChange?: () => void
 }
@@ -16,43 +20,91 @@ interface MobileNavigatorDeps {
 interface MobileNavigator {
   readonly navigateTo: (type: string, entityId: string | null) => Promise<string>
   readonly goBack: () => Promise<void>
+  readonly getHistory: () => ReadonlyArray<ColumnRef>
+  readonly destroy: () => void
 }
 
 const createMobileNavigator = (
   {
     getState,
     setState,
-    mobileHistory,
+    initialHistory,
     createColumn,
-    closeAllColumns,
     renderColumn,
+    suspendColumn,
+    restoreColumn,
+    destroyColumns,
+    closeAllColumns,
     focusColumn,
     onMobileHistoryChange,
   }: MobileNavigatorDeps,
 ): MobileNavigator => {
-  const showColumn = async (type: string, entityId: string | null, shouldScroll: boolean): Promise<string> => {
-    closeAllColumns()
-    const column = createColumn(type, entityId)
-    setState(addColumn(getState(), column))
-    await renderColumn(column, shouldScroll)
+  let stack: MobileStack = seedStack(initialHistory)
+
+  const apply = (change: StackChange): void => {
+    destroyColumns(change.destroyed)
+    stack = change.stack
+  }
+
+  const presented = (column: Column): string => {
     focusColumn(column.key)
     onMobileHistoryChange?.()
     return column.key
   }
 
-  const navigateTo = (type: string, entityId: string | null): Promise<string> => {
+  const show = async (column: Column, shouldScroll: boolean): Promise<string> => {
+    setState(addColumn(getState(), column))
+    const rendered = renderColumn(column, shouldScroll)
+    const key = presented(column)
+    await rendered
+    return key
+  }
+
+  const restore = ({ column, scrollTop }: SuspendedEntry): string => {
+    setState(addColumn(getState(), column))
+    restoreColumn(column, scrollTop)
+    return presented(column)
+  }
+
+  const suspendCurrent = (): void => {
     const current = getState().columns[0]
-    if (current) mobileHistory.push({ type: current.type, entityId: current.entityId })
-    return showColumn(type, entityId, true)
+    if (!current) return
+    const scrollTop = suspendColumn(current)
+    setState(createColumnState())
+    apply(suspendOnto(stack, current, scrollTop))
+  }
+
+  const navigateTo = (type: string, entityId: string | null): Promise<string> => {
+    const column = createColumn(type, entityId)
+    const unwound = unwindTo(stack, column.key)
+    if (!unwound) {
+      suspendCurrent()
+      return show(column, true)
+    }
+    closeAllColumns()
+    apply(unwound)
+    if (unwound.target.column.entityId === entityId) return Promise.resolve(restore(unwound.target))
+    destroyColumns([unwound.target.column])
+    return show(column, true)
   }
 
   const goBack = async (): Promise<void> => {
-    const prev = mobileHistory.pop()
-    if (!prev) return
-    await showColumn(prev.type, prev.entityId, false)
+    const popped = popTop(stack)
+    if (!popped) return
+    closeAllColumns()
+    stack = popped.stack
+    if (popped.entry.kind === "suspended") {
+      restore(popped.entry)
+      return
+    }
+    await show(createColumn(popped.entry.type, popped.entry.entityId), false)
   }
 
-  return Object.freeze({ navigateTo, goBack })
+  const getHistory = (): ReadonlyArray<ColumnRef> => historyOf(stack)
+
+  const destroy = (): void => apply(clearStack(stack))
+
+  return Object.freeze({ navigateTo, goBack, getHistory, destroy })
 }
 
 export type { MobileNavigator, MobileNavigatorDeps }

@@ -34,7 +34,10 @@ const setup = (): void => {
   Reflect.set(globalThis, "Element", DenoDomElement)
   Reflect.set(globalThis, "HTMLElement", DenoDomElement)
   Reflect.set(globalThis, "HTMLButtonElement", DenoDomElement)
-  Reflect.set(globalThis, "requestAnimationFrame", (_cb: FrameRequestCallback): number => 0)
+  Reflect.set(globalThis, "requestAnimationFrame", (cb: FrameRequestCallback): number => {
+    cb(0)
+    return 0
+  })
   Reflect.set(
     globalThis,
     "IntersectionObserver",

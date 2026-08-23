@@ -9,15 +9,27 @@ interface AssetLoader {
   readonly cloneTemplate: (id: string) => DocumentFragment
 }
 
-/** A single entry in a column's header menu or list selector; `separator` renders a divider instead of an action. */
-interface MenuItem {
-  readonly label?: string
-  readonly action?: string
-  readonly separator?: boolean
-  readonly disabled?: boolean
+/** A divider between entries in a column's header menu or list selector. */
+interface MenuSeparator {
+  readonly separator: true
+}
+
+/** An actionable entry in a column's header menu or list selector. */
+interface MenuAction {
+  readonly label: string
+  readonly action: string
   readonly variant?: string
   readonly selected?: boolean
 }
+
+/** A greyed-out, non-actionable entry that tells the user something ("No lists yet", "Loading…"). */
+interface MenuNotice {
+  readonly label: string
+  readonly disabled: true
+}
+
+/** A single entry in a column's header menu or list selector. */
+type MenuItem = MenuSeparator | MenuAction | MenuNotice
 
 /** The user's pick from a column's list selector: the chosen action and the button element that triggered it. */
 interface ListSelection {
@@ -185,15 +197,7 @@ const createColumnDefinition = <
         errors.push(err)
       }
     }
-    if (errors.length === 0) return
-    // Every teardown runs even if some throw; their failures are collected and
-    // surfaced together as one AggregateError. The rethrow is deferred so the
-    // host's global error handler sees it without aborting column close or the
-    // remaining teardowns — the framework has no error sink in its public surface.
-    const aggregate = new AggregateError(errors, "Column teardown failed")
-    setTimeout(() => {
-      throw aggregate
-    }, 0)
+    if (errors.length > 0) reportError(new AggregateError(errors, "Column teardown failed"))
   }
 
   const loadAssets = async (assetLoader: AssetLoader): Promise<void> => {
@@ -297,7 +301,10 @@ export type {
   ColumnServices,
   ColumnStateShape,
   ListSelection,
+  MenuAction,
   MenuItem,
+  MenuNotice,
+  MenuSeparator,
   OuterColumnContext,
 }
 export { createColumnDefinition }

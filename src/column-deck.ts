@@ -1,7 +1,6 @@
 import type { AssetLoader, ColumnDefinition, ColumnServices } from "./column-base.ts"
 import type { PersistenceAdapter } from "./column-persistence.ts"
-import type { ColumnKey, ColumnState } from "./column-state.ts"
-import type { MobileHistoryEntry } from "./column-history.ts"
+import type { ColumnKey, ColumnRef, ColumnState } from "./column-state.ts"
 import type { ColumnAssetPaths } from "./column-manager.ts"
 import { createColumnManager } from "./column-manager.ts"
 import { createDragHandler } from "./drag-handler.ts"
@@ -20,9 +19,9 @@ interface ColumnDeckDeps<S extends ColumnServices = ColumnServices> {
   readonly shellTemplate?: ShellTemplate
   readonly persistence?: PersistenceAdapter
   readonly isMobile?: () => boolean
-  readonly initialMobileHistory?: ReadonlyArray<MobileHistoryEntry>
+  readonly initialMobileHistory?: ReadonlyArray<ColumnRef>
   readonly assetPaths?: ColumnAssetPaths
-  readonly onPinnedColumnsChange?: ((columns: ReadonlyArray<{ type: string; entityId: string | null }>) => void) | null
+  readonly onPinnedColumnsChange?: ((columns: ReadonlyArray<ColumnRef>) => void) | null
   readonly onMobileHistoryChange?: () => void
   readonly onEscape?: () => boolean
   readonly columnDefinitions?: ReadonlyArray<ColumnDefinition<S>>
@@ -39,7 +38,7 @@ interface ColumnDeck {
   readonly getState: () => ColumnState
   readonly getColumnCount: () => number
   readonly getFocusedColumnElement: () => HTMLElement | null
-  readonly getMobileHistory: () => ReadonlyArray<MobileHistoryEntry>
+  readonly getMobileHistory: () => ReadonlyArray<ColumnRef>
   readonly setPinned: (key: ColumnKey, pinned: boolean) => void
   readonly destroy: () => void
 }

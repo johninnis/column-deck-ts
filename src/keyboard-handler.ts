@@ -40,15 +40,18 @@ const createKeyboardHandler = (deps: KeyboardHandlerDeps): KeyboardHandler => {
     const direction = event.key === "ArrowLeft" ? -1 : 1
 
     if (event.shiftKey) {
+      const key = getColumnKeyFromElement(column)
+      if (key === null) return
       event.preventDefault()
-      onMoveColumn(getColumnKeyFromElement(column), direction)
+      onMoveColumn(key, direction)
       return
     }
 
-    const nextColumn = columns[columns.indexOf(column) + direction]
-    if (nextColumn) {
+    const nextKey = columns[columns.indexOf(column) + direction]
+    const key = nextKey ? getColumnKeyFromElement(nextKey) : null
+    if (key !== null) {
       event.preventDefault()
-      onFocusColumn(getColumnKeyFromElement(nextColumn))
+      onFocusColumn(key)
     }
   }
 
@@ -91,16 +94,21 @@ const createKeyboardHandler = (deps: KeyboardHandlerDeps): KeyboardHandler => {
 
     if (event.key === "x") {
       const focusedColumn = activeElement?.closest<HTMLElement>("[data-column]") ?? null
-      if (focusedColumn && focusedColumn.dataset.pinned === undefined) {
+      const key = focusedColumn && focusedColumn.dataset.pinned === undefined
+        ? getColumnKeyFromElement(focusedColumn)
+        : null
+      if (key !== null) {
         event.preventDefault()
-        onClose(getColumnKeyFromElement(focusedColumn))
+        onClose(key)
       }
       return
     }
 
     if (event.key === "r" && column) {
+      const key = getColumnKeyFromElement(column)
+      if (key === null) return
       event.preventDefault()
-      onRefresh(getColumnKeyFromElement(column))
+      onRefresh(key)
     }
   }
 

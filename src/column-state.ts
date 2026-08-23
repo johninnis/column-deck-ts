@@ -1,10 +1,14 @@
 /** Uniquely identifies an open column: `type` for singletons, `type:entityId` for entity-bound instances. */
 type ColumnKey = string
 
-/** An open column: its type, optional entity binding, derived key, spawning column, and pinned flag. */
-interface Column {
+/** Names a column by type and optional entity — enough to launch it again. */
+interface ColumnRef {
   readonly type: string
   readonly entityId: string | null
+}
+
+/** An open column: its type, optional entity binding, derived key, spawning column, and pinned flag. */
+interface Column extends ColumnRef {
   readonly key: ColumnKey
   readonly spawnedFrom: ColumnKey | null
   readonly pinned: boolean
@@ -88,7 +92,7 @@ const pinnedColumns = (state: ColumnState): ReadonlyArray<Column> => state.colum
 
 const getPinnedCount = (state: ColumnState): number => pinnedColumns(state).length
 
-export type { Column, ColumnKey, ColumnState, CreateColumnParams }
+export type { Column, ColumnKey, ColumnRef, ColumnState, CreateColumnParams }
 export {
   addColumn,
   createColumn,

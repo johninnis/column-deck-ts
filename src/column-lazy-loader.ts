@@ -28,7 +28,8 @@ const createColumnLazyLoader = ({ mountElement, loadColumn }: ColumnLazyLoaderDe
       for (const entry of entries) {
         if (!entry.isIntersecting) continue
         if (!(entry.target instanceof HTMLElement)) continue
-        const item = pending.get(getColumnKeyFromElement(entry.target))
+        const key = getColumnKeyFromElement(entry.target)
+        const item = key === null ? undefined : pending.get(key)
         if (!item) continue
         pending.delete(item.column.key)
         created.unobserve(entry.target)

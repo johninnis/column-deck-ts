@@ -105,7 +105,7 @@ Returns a `ColumnDeck` with `launchColumn`, `closeColumn`, `refreshColumn`, `und
 
 Launching an unregistered column type rejects with `ColumnLifecycleError` before any state changes.
 
-The deck owns the mobile back-stack. Seed it with `initialMobileHistory`, observe changes via `onMobileHistoryChange`, and read it with `getMobileHistory()` — there is no shared mutable array crossing the API boundary.
+The deck owns the mobile back-stack. Seed it with `initialMobileHistory`, observe changes via `onMobileHistoryChange`, and read it with `getMobileHistory()` — there is no shared mutable array crossing the API boundary. On mobile, navigating forward *suspends* the current column rather than closing it: its element is detached with its subscriptions and per-mount state intact and its scroll position remembered, and `goBack()` re-attaches it exactly as it was. Launching a column that is already suspended on the stack unwinds to it (closing everything above). At most eight suspended columns are kept alive; older ones are destroyed and re-rendered fresh if you return to them. `destroy()` destroys suspended columns too. Navigation notifies `onMobileHistoryChange` and moves focus as soon as the new shell is mounted — the column's own render continues behind it; the renderer yields one frame between mounting a shell and rendering its content so the chrome paints before a heavy render.
 
 The layout is written to `persistence.save` on every state change (desktop only) and restored through `persistence.load` on construction. One adapter is the single persistence channel.
 
@@ -138,7 +138,7 @@ a `header` (the drag handle) holding `[data-title]`, `[data-pin-btn]`, `[data-li
 The deck ships no CSS. It marks state with attributes for the host's stylesheet: `[data-column]` and
 `[data-column-key]` on every shell root, `[data-pinned]`, `[data-dragging]`, `[data-visible]` on an open
 `[data-menu-list]`/`[data-lists-list]`, `[data-separator]`, `[data-variant]` and `[data-selected]` on menu entries,
-`[data-loading]` on the loading indicator, `[data-status-bar]` on the title, and `[hidden]`. Column focus lands on the
+`[data-loading]` on the loading indicator, `[data-status-bar]` on the title, and the `hidden` attribute (the close button of a pinned column, for one) — so a host stylesheet must let `[hidden]` win over its own `display` rules. Column focus lands on the
 header `h2`, so `header:focus-within` styles the focused column.
 
 ### Column definition — `column-base.ts`
@@ -155,7 +155,7 @@ interface ColumnDefinitionParams<S, State> {
     readonly hasLists?: boolean
     readonly hasPin?: boolean
     readonly singleton?: boolean
-    readonly menuItems?: MenuItem[] | null
+    readonly menuItems?: MenuItem[] | null        // MenuAction | MenuNotice | MenuSeparator
     readonly getTitle?: (entityId?) => string
     readonly onRender: (content, context: ColumnContext<S, State>) => Promise<void>
     readonly onRefresh?: (content, context) => Promise<void>

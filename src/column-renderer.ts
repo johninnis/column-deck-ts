@@ -1,10 +1,9 @@
 import type { AssetLoader, ColumnServices, OuterColumnContext } from "./column-base.ts"
-import type { Column, ColumnKey, ColumnState } from "./column-state.ts"
+import type { Column, ColumnKey } from "./column-state.ts"
 import type { ColumnShell } from "./column-shell.ts"
 import type { ColumnRegistry } from "./column-registry.ts"
 import { createColumnShell } from "./column-shell.ts"
 import type { ShellTemplate } from "./shell-template.ts"
-import { findColumn } from "./column-state.ts"
 import { applyColumnDataset } from "./column-dom.ts"
 import { ColumnLifecycleError } from "./errors.ts"
 
@@ -24,7 +23,6 @@ interface ColumnRendererDeps<S extends ColumnServices = ColumnServices> {
   readonly assetLoader: AssetLoader
   readonly shellTemplate: ShellTemplate
   readonly columnRegistry: ColumnRegistry<S>
-  readonly getState: () => ColumnState
   readonly onFocus: (key: ColumnKey) => void
 }
 
@@ -34,17 +32,18 @@ interface ColumnRenderer<S extends ColumnServices = ColumnServices> {
   readonly mountColumnShell: (column: Column, callbacks: ColumnCallbacks) => ColumnShell
   readonly syncColumnDataset: (column: Column) => void
   readonly loadColumnContent: (column: Column, shell: ColumnShell, context: OuterColumnContext<S>) => Promise<void>
-  readonly removeColumnElements: (columns: ReadonlyArray<{ readonly key: ColumnKey }>) => void
+  readonly destroyColumns: (columns: ReadonlyArray<Column>) => void
   readonly getElement: (key: ColumnKey) => HTMLElement | undefined
   readonly getShell: (key: ColumnKey) => ColumnShell | undefined
 }
+
+const nextPaint = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
 
 const createColumnRenderer = <S extends ColumnServices = ColumnServices>({
   scrollContainer,
   assetLoader,
   shellTemplate,
   columnRegistry,
-  getState,
   onFocus,
 }: ColumnRendererDeps<S>): ColumnRenderer<S> => {
   const columnShells = new Map<ColumnKey, ColumnShell>()
@@ -103,19 +102,18 @@ const createColumnRenderer = <S extends ColumnServices = ColumnServices>({
     const definition = columnRegistry.get(column.type)
     if (!definition) return
     await definition.loadAssets(assetLoader)
+    await nextPaint()
     // The column may have been closed or the deck destroyed while assets loaded; onDestroy has
     // already run for it, so rendering now would wire up work nothing will ever tear down.
     if (columnShells.get(column.key) !== shell) return
     await definition.render(shell.getContentElement(), context)
   }
 
-  const removeColumnElements = (columns: ReadonlyArray<{ readonly key: ColumnKey }>): void => {
+  const destroyColumns = (columns: ReadonlyArray<Column>): void => {
     columns.forEach((col) => {
       const shell = columnShells.get(col.key)
       if (!shell) return
-      const column = findColumn(getState(), col.key)
-      const definition = column ? columnRegistry.get(column.type) : null
-      definition?.onDestroy(shell.getContentElement())
+      columnRegistry.get(col.type)?.onDestroy(shell.getContentElement())
       shell.element.remove()
       shell.destroy()
       columnShells.delete(col.key)
@@ -138,7 +136,7 @@ const createColumnRenderer = <S extends ColumnServices = ColumnServices>({
     mountColumnShell,
     syncColumnDataset,
     loadColumnContent,
-    removeColumnElements,
+    destroyColumns,
     getElement,
     getShell,
   })

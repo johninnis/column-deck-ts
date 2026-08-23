@@ -10,6 +10,6 @@ const applyColumnDataset = (element: HTMLElement, column: Column): void => {
   }
 }
 
-const getColumnKeyFromElement = (element: HTMLElement): ColumnKey => element.dataset.columnKey ?? ""
+const getColumnKeyFromElement = (element: HTMLElement): ColumnKey | null => element.dataset.columnKey ?? null
 
 export { applyColumnDataset, getColumnKeyFromElement }

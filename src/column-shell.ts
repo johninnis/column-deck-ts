@@ -1,4 +1,4 @@
-import type { MenuItem } from "./column-base.ts"
+import type { MenuAction, MenuItem } from "./column-base.ts"
 import { ColumnLifecycleError } from "./errors.ts"
 import type { ShellTemplate } from "./shell-template.ts"
 
@@ -38,12 +38,12 @@ const isDropdownClosed = (dropdown: DropdownControl): boolean => dropdown.list.d
 const populateDropdown = (
   list: HTMLElement,
   items: ReadonlyArray<MenuItem>,
-  onItemClick: (item: MenuItem, btn: HTMLButtonElement) => void,
+  onItemClick: (item: MenuAction, btn: HTMLButtonElement) => void,
 ): void => {
   list.innerHTML = ""
   items.forEach((item) => {
     const li = document.createElement("li")
-    if (item.separator) {
+    if ("separator" in item) {
       li.dataset.separator = ""
       list.appendChild(li)
       return
@@ -51,14 +51,17 @@ const populateDropdown = (
     li.setAttribute("role", "none")
     const btn = document.createElement("button")
     btn.setAttribute("role", "menuitem")
-    btn.textContent = item.label ?? ""
-    if (item.disabled) btn.disabled = true
-    if (item.variant) btn.dataset.variant = item.variant
-    if (item.selected) btn.dataset.selected = ""
-    btn.addEventListener("click", (e: MouseEvent) => {
-      e.stopPropagation()
-      onItemClick(item, btn)
-    })
+    btn.textContent = item.label
+    if ("disabled" in item) {
+      btn.disabled = true
+    } else {
+      if (item.variant) btn.dataset.variant = item.variant
+      if (item.selected) btn.dataset.selected = ""
+      btn.addEventListener("click", (e: MouseEvent) => {
+        e.stopPropagation()
+        onItemClick(item, btn)
+      })
+    }
     li.appendChild(btn)
     list.appendChild(li)
   })
@@ -141,11 +144,11 @@ const createColumnShell = ({
   const updateMenuItems = (items: ReadonlyArray<MenuItem>): void =>
     populateDropdown(menu.list, items, (item) => {
       setDropdownOpen(menu, false)
-      onMenuSelect(item.action ?? "")
+      onMenuSelect(item.action)
     })
 
   const updateListItems = (items: ReadonlyArray<MenuItem>): void =>
-    populateDropdown(lists.list, items, (item, btn) => onListSelect(item.action ?? "", btn))
+    populateDropdown(lists.list, items, (item, btn) => onListSelect(item.action, btn))
 
   const updateTitle = (newTitle: string): void => {
     titleEl.textContent = newTitle
@@ -200,14 +203,12 @@ const createColumnShell = ({
   let pinned = false
   const setPinned = (value: boolean, { notify = true }: { readonly notify?: boolean } = {}): void => {
     pinned = value
+    closeBtn.hidden = pinned
+    header.setAttribute("draggable", String(!pinned))
     if (pinned) {
       shell.dataset.pinned = ""
-      header.setAttribute("draggable", "false")
-      if (closeBtn.parentNode) closeBtn.style.display = "none"
     } else {
       delete shell.dataset.pinned
-      header.setAttribute("draggable", "true")
-      if (closeBtn.parentNode) closeBtn.style.display = ""
     }
     if (notify) onPinChange(pinned)
   }

@@ -35,7 +35,10 @@ const setup = (): void => {
   Reflect.set(globalThis, "Element", DenoDomElement)
   Reflect.set(globalThis, "HTMLElement", DenoDomElement)
   Reflect.set(globalThis, "HTMLButtonElement", DenoDomElement)
-  Reflect.set(globalThis, "requestAnimationFrame", (_cb: FrameRequestCallback): number => 0)
+  Reflect.set(globalThis, "requestAnimationFrame", (cb: FrameRequestCallback): number => {
+    cb(0)
+    return 0
+  })
   Reflect.set(
     globalThis,
     "IntersectionObserver",
@@ -67,6 +70,7 @@ const assetLoader = {
 interface HarnessOverrides {
   readonly isMobile?: boolean
   readonly saved?: string | null
+  readonly slowRender?: Promise<void>
 }
 
 const makeHarness = (overrides: HarnessOverrides = {}) => {
@@ -100,6 +104,10 @@ const makeHarness = (overrides: HarnessOverrides = {}) => {
     }),
   )
 
+  columnRegistry.register(
+    "slow",
+    createColumnDefinition({ type: "slow", label: "Slow", onRender: () => overrides.slowRender ?? Promise.resolve() }),
+  )
   const pinnedChanges: Array<ReadonlyArray<{ type: string; entityId: string | null }>> = []
   let mobileHistoryChanges = 0
 
@@ -302,4 +310,98 @@ Deno.test("createColumnManager - destroy during asset load does not render into 
   releaseCss()
   await launch
   assertEquals(renders, [])
+})
+
+Deno.test("createColumnManager - on mobile, navigation notifies and records history as soon as the shell is mounted, not after the column renders", async () => {
+  let finishRender = (): void => {}
+  const slowRender = new Promise<void>((resolve) => {
+    finishRender = resolve
+  })
+  const { manager, mountElement, getMobileHistoryChanges } = makeHarness({ isMobile: true, slowRender })
+  await manager.launchColumn("feed")
+  const changesBefore = getMobileHistoryChanges()
+
+  const launched = manager.launchColumn("slow")
+  await Promise.resolve()
+  const observed = {
+    changes: getMobileHistoryChanges() - changesBefore,
+    history: manager.getMobileHistory().length,
+    mounted: mountElement.querySelector('[data-column="slow"]') !== null,
+  }
+  finishRender()
+  await launched
+
+  assertEquals(observed, { changes: 1, history: 1, mounted: true })
+})
+
+const scrollRegionOf = (mountElement: HTMLElement, type: string): HTMLElement => {
+  const content = mountElement.querySelector(`[data-column="${type}"] [data-content]`)
+  if (!(content instanceof HTMLElement)) throw new Error(`content missing for ${type}`)
+  return content
+}
+
+Deno.test("createColumnManager - on mobile, goBack re-attaches the suspended column with its scroll position", async () => {
+  const { manager, mountElement } = makeHarness({ isMobile: true })
+  await manager.launchColumn("feed")
+  const feedElement = mountElement.querySelector('[data-column="feed"]')
+  scrollRegionOf(mountElement, "feed").scrollTop = 120
+  await manager.launchColumn("note", "1")
+  const feedGoneWhileAway = mountElement.querySelector('[data-column="feed"]') === null
+  await manager.goBack()
+
+  assertEquals(
+    [
+      feedGoneWhileAway,
+      mountElement.querySelector('[data-column="feed"]') === feedElement,
+      scrollRegionOf(mountElement, "feed").scrollTop,
+    ],
+    [true, true, 120],
+  )
+})
+
+Deno.test("createColumnManager - on mobile, suspending a column does not run its teardowns; going back keeps them", async () => {
+  const { manager, teardowns } = makeHarness({ isMobile: true })
+  await manager.launchColumn("widget")
+  await manager.launchColumn("note", "1")
+  await manager.goBack()
+  assertEquals(teardowns, [])
+})
+
+Deno.test("createColumnManager - on mobile, launching a column already on the stack unwinds to it and closes what was above", async () => {
+  const { manager, mountElement, teardowns } = makeHarness({ isMobile: true })
+  await manager.launchColumn("feed")
+  const feedElement = mountElement.querySelector('[data-column="feed"]')
+  await manager.launchColumn("widget")
+  await manager.launchColumn("note", "1")
+  await manager.launchColumn("feed")
+
+  assertEquals(
+    [mountElement.querySelector('[data-column="feed"]') === feedElement, manager.getMobileHistory().length, teardowns],
+    [true, 0, ["widget"]],
+  )
+})
+
+Deno.test("createColumnManager - destroy tears down suspended mobile columns", async () => {
+  const { manager, teardowns } = makeHarness({ isMobile: true })
+  await manager.launchColumn("widget")
+  await manager.launchColumn("feed")
+  manager.destroy()
+  assertEquals(teardowns, ["widget"])
+})
+
+Deno.test("createColumnManager - on mobile, the oldest suspended column beyond the cap is destroyed and re-rendered fresh on return", async () => {
+  const { manager, mountElement, teardowns } = makeHarness({ isMobile: true })
+  await manager.launchColumn("widget")
+  for (let i = 1; i <= 9; i++) await manager.launchColumn("note", String(i))
+  const destroyedWhileSuspended = [...teardowns]
+  for (let i = 1; i <= 9; i++) await manager.goBack()
+
+  assertEquals(
+    [
+      destroyedWhileSuspended,
+      mountElement.querySelector('[data-column="widget"]') !== null,
+      manager.getMobileHistory().length,
+    ],
+    [["widget"], true, 0],
+  )
 })
