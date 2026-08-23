@@ -1,5 +1,6 @@
 import type { MenuItem } from "./column-base.ts"
 import { ColumnLifecycleError } from "./errors.ts"
+import type { ShellTemplate } from "./shell-template.ts"
 
 const query = <T extends Element>(root: ParentNode, selector: string, type: { new (): T }): T => {
   const el = root.querySelector(selector)
@@ -64,7 +65,7 @@ const populateDropdown = (
 }
 
 interface ColumnShellParams {
-  readonly cloneTemplate: (id: string) => DocumentFragment
+  readonly shellTemplate: ShellTemplate
   readonly title: string
   readonly hasClose?: boolean
   readonly hasRefresh?: boolean
@@ -93,7 +94,7 @@ interface ColumnShell {
 }
 
 const createColumnShell = ({
-  cloneTemplate,
+  shellTemplate,
   title,
   hasClose = true,
   hasRefresh = true,
@@ -109,10 +110,10 @@ const createColumnShell = ({
   onPinChange = () => {},
   scrollContainer = null,
 }: ColumnShellParams): ColumnShell => {
-  const fragment = cloneTemplate("column-shell-template")
+  const fragment = shellTemplate()
   const firstChild = fragment.firstElementChild
   if (!(firstChild instanceof HTMLElement)) {
-    throw new ColumnLifecycleError("column-shell-template must have an HTMLElement root")
+    throw new ColumnLifecycleError("shell template must have an HTMLElement root")
   }
   const shell = firstChild
   const abortController = new AbortController()

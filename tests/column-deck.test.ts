@@ -86,6 +86,7 @@ const makeDeck = async (overrides: DeckOverrides = {}) => {
   const deck = await createColumnDeck({
     mountElement,
     assetLoader,
+    shellTemplate: cloneTemplate,
     persistence: {
       save: (data: string): void => {
         store.data = data
@@ -153,6 +154,43 @@ Deno.test("createColumnDeck - refreshColumn runs the definition's onRefresh", as
   const key = await deck.launchColumn("feed")
   await deck.refreshColumn(key)
   assertEquals(refreshes, ["feed"])
+  deck.destroy()
+})
+
+Deno.test("createColumnDeck - without overrides it uses the default shell, a session-storage layout and the browser asset loader", async () => {
+  sessionStorage.removeItem("column-deck")
+  Reflect.set(globalThis, "matchMedia", (): { matches: boolean } => ({ matches: true }))
+  const mountElement = document.createElement("main")
+  const deck = await createColumnDeck({
+    mountElement,
+    columnDefinitions: [
+      createColumnDefinition({
+        type: "feed",
+        label: "Feed",
+        onRender: (content) => {
+          content.textContent = "rendered"
+          return Promise.resolve()
+        },
+      }),
+    ],
+    services: {},
+  })
+  await deck.launchColumn("feed")
+  const shell = mountElement.querySelector("[data-column]")
+  assertEquals(shell?.querySelector("[data-title]")?.textContent, "Feed")
+  assertEquals(shell?.querySelector("[data-content]")?.textContent, "rendered")
+  assertEquals(JSON.parse(sessionStorage.getItem("column-deck") ?? "null")?.columns?.length, 1)
+  deck.destroy()
+  sessionStorage.removeItem("column-deck")
+})
+
+Deno.test("createColumnDeck - getFocusedColumnElement returns the column the user last focused", async () => {
+  const { deck, mountElement } = await makeDeck()
+  await deck.launchColumn("feed")
+  const column = mountElement.querySelector("[data-column]")
+  if (!(column instanceof HTMLElement)) throw new Error("column missing")
+  column.dispatchEvent(new Event("click"))
+  assertEquals(deck.getFocusedColumnElement(), column)
   deck.destroy()
 })
 

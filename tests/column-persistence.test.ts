@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert"
-import { parseSavedColumns, serialiseColumns } from "../src/column-persistence.ts"
+import { createSessionStoragePersistence, parseSavedColumns, serialiseColumns } from "../src/column-persistence.ts"
 import { addColumn, createColumn, createColumnState } from "../src/column-state.ts"
 
 Deno.test("parseSavedColumns - reads the columns field of the wrapper object", () => {
@@ -73,4 +73,17 @@ Deno.test("serialiseColumns / parseSavedColumns round-trip preserves the saved d
     { type: "feed", entityId: null, pinned: true },
     { type: "profile", entityId: "abc", pinned: false },
   ])
+})
+
+Deno.test("createSessionStoragePersistence - round-trips the layout through sessionStorage under its key", () => {
+  const key = "column-deck-test-layout"
+  sessionStorage.removeItem(key)
+  try {
+    const persistence = createSessionStoragePersistence(key)
+    const before = persistence.load()
+    persistence.save("{}")
+    assertEquals([before, persistence.load(), sessionStorage.getItem(key)], [null, "{}", "{}"])
+  } finally {
+    sessionStorage.removeItem(key)
+  }
 })

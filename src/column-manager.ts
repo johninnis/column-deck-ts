@@ -16,6 +16,7 @@ import {
   setLastFocused,
 } from "./column-state.ts"
 import { createColumnRenderer } from "./column-renderer.ts"
+import type { ShellTemplate } from "./shell-template.ts"
 import { createColumnLazyLoader } from "./column-lazy-loader.ts"
 import { createClosedColumnsHistory } from "./column-history.ts"
 import { createMobileNavigator } from "./column-mobile-nav.ts"
@@ -45,6 +46,7 @@ interface ColumnManagerDeps<S extends ColumnServices = ColumnServices> {
   readonly mountElement: HTMLElement
   readonly persistence: PersistenceAdapter
   readonly assetLoader: AssetLoader
+  readonly shellTemplate: ShellTemplate
   readonly assetPaths?: ColumnAssetPaths
   readonly columnRegistry: ColumnRegistry<S>
   readonly isMobile: () => boolean
@@ -81,6 +83,7 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
   mountElement,
   persistence,
   assetLoader,
+  shellTemplate,
   assetPaths,
   columnRegistry,
   isMobile,
@@ -96,6 +99,7 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
   const renderer: ColumnRenderer<S> = createColumnRenderer({
     scrollContainer: mountElement,
     assetLoader,
+    shellTemplate,
     columnRegistry,
     getState: () => state,
     onFocus: (key) => {

@@ -3,6 +3,7 @@ import type { Column, ColumnKey, ColumnState } from "./column-state.ts"
 import type { ColumnShell } from "./column-shell.ts"
 import type { ColumnRegistry } from "./column-registry.ts"
 import { createColumnShell } from "./column-shell.ts"
+import type { ShellTemplate } from "./shell-template.ts"
 import { findColumn } from "./column-state.ts"
 import { applyColumnDataset } from "./column-dom.ts"
 import { ColumnLifecycleError } from "./errors.ts"
@@ -21,6 +22,7 @@ interface ColumnCallbacks {
 interface ColumnRendererDeps<S extends ColumnServices = ColumnServices> {
   readonly scrollContainer: HTMLElement
   readonly assetLoader: AssetLoader
+  readonly shellTemplate: ShellTemplate
   readonly columnRegistry: ColumnRegistry<S>
   readonly getState: () => ColumnState
   readonly onFocus: (key: ColumnKey) => void
@@ -40,6 +42,7 @@ interface ColumnRenderer<S extends ColumnServices = ColumnServices> {
 const createColumnRenderer = <S extends ColumnServices = ColumnServices>({
   scrollContainer,
   assetLoader,
+  shellTemplate,
   columnRegistry,
   getState,
   onFocus,
@@ -64,7 +67,7 @@ const createColumnRenderer = <S extends ColumnServices = ColumnServices>({
     }
 
     const shell = createColumnShell({
-      cloneTemplate: assetLoader.cloneTemplate,
+      shellTemplate,
       title: definition.getTitle(column.entityId),
       hasClose: definition.hasClose,
       hasRefresh: definition.hasRefresh,
@@ -126,18 +129,7 @@ const createColumnRenderer = <S extends ColumnServices = ColumnServices>({
   const focusColumn = (key: ColumnKey): void => {
     const shell = columnShells.get(key)
     if (!shell) return
-    const header = shell.element.querySelector<HTMLElement>("header")
-    const heading = shell.element.querySelector<HTMLElement>("h2")
-    if (!header || !heading) return
-    columnShells.forEach((other) => {
-      const otherHeader = other.element.querySelector<HTMLElement>("header")
-      if (otherHeader) delete otherHeader.dataset.keyboardFocus
-    })
-    header.dataset.keyboardFocus = ""
-    heading.focus()
-    heading.addEventListener("blur", () => {
-      delete header.dataset.keyboardFocus
-    }, { once: true })
+    shell.element.querySelector<HTMLElement>("header h2")?.focus()
   }
 
   return Object.freeze({

@@ -3,6 +3,8 @@ import { DOMParser, Element as DenoDomElement } from "deno-dom"
 import { createKeyboardHandler } from "../src/keyboard-handler.ts"
 import type { KeyboardHandlerDeps } from "../src/keyboard-handler.ts"
 
+let activeElement: HTMLElement | null = null
+
 let ready = false
 const setup = (): void => {
   if (ready) return
@@ -11,21 +13,17 @@ const setup = (): void => {
   if (!doc) throw new Error("parse failed")
   Reflect.set(globalThis, "document", doc)
   Reflect.set(globalThis, "HTMLElement", DenoDomElement)
-  Object.defineProperty(DenoDomElement.prototype, "scrollIntoView", { value: () => {}, configurable: true })
+  Object.defineProperty(DenoDomElement.prototype, "focus", {
+    value(this: HTMLElement): void {
+      activeElement = this
+    },
+    configurable: true,
+  })
   Object.defineProperty(DenoDomElement.prototype, "blur", {
-    value(): void {
+    value(this: HTMLElement): void {
       Reflect.set(this, "__blurred", true)
+      if (activeElement === this) activeElement = null
     },
-    configurable: true,
-  })
-  Object.defineProperty(DenoDomElement.prototype, "click", {
-    value(): void {
-      Reflect.set(this, "__clicked", true)
-    },
-    configurable: true,
-  })
-  Object.defineProperty(DenoDomElement.prototype, "getBoundingClientRect", {
-    value: (): { top: number; bottom: number } => ({ top: 0, bottom: 0 }),
     configurable: true,
   })
   Object.defineProperty(DenoDomElement.prototype, "scrollTo", {
@@ -41,11 +39,13 @@ interface KeyModifiers {
   readonly ctrlKey?: boolean
   readonly metaKey?: boolean
   readonly shiftKey?: boolean
+  readonly defaultPrevented?: boolean
 }
 
 interface DocumentStub {
   readonly press: (key: string, modifiers?: KeyModifiers) => { readonly prevented: boolean }
   readonly setActiveElement: (element: HTMLElement | null) => void
+  readonly activeElement: () => HTMLElement | null
   readonly listenerCount: () => number
   readonly restore: () => void
 }
@@ -53,7 +53,7 @@ interface DocumentStub {
 const installDocumentStub = (): DocumentStub => {
   const original = Reflect.get(globalThis, "document")
   const listeners = new Set<(event: KeyboardEvent) => void>()
-  let activeElement: HTMLElement | null = null
+  activeElement = null
   Reflect.set(globalThis, "document", {
     addEventListener: (_type: string, listener: (event: KeyboardEvent) => void): void => {
       listeners.add(listener)
@@ -74,6 +74,7 @@ const installDocumentStub = (): DocumentStub => {
         ctrlKey: false,
         metaKey: false,
         shiftKey: false,
+        defaultPrevented: false,
         ...modifiers,
         preventDefault: (): void => {
           prevented = true
@@ -85,21 +86,18 @@ const installDocumentStub = (): DocumentStub => {
     setActiveElement: (element) => {
       activeElement = element
     },
+    activeElement: () => activeElement,
     listenerCount: () => listeners.size,
     restore: () => Reflect.set(globalThis, "document", original),
   }
 }
 
-const makeColumn = (key: string, options: { readonly pinned?: boolean; readonly items?: number } = {}): HTMLElement => {
+const makeColumn = (key: string, options: { readonly pinned?: boolean } = {}): HTMLElement => {
   const column = document.createElement("article")
   column.setAttribute("data-column", "")
   column.dataset.columnKey = key
   if (options.pinned) column.dataset.pinned = ""
-  const navigables = Array.from(
-    { length: options.items ?? 0 },
-    () => "<button data-navigable></button>",
-  ).join("")
-  column.innerHTML = `<header><h2></h2></header><div data-content>${navigables}</div>`
+  column.innerHTML = "<header><h2></h2></header><div data-content></div>"
   return column
 }
 
@@ -108,7 +106,6 @@ interface HarnessCalls {
   readonly moved: Array<{ key: string; direction: number }>
   readonly closed: Array<string>
   readonly refreshed: Array<string>
-  composed: number
   undone: number
 }
 
@@ -137,7 +134,6 @@ const makeHarness = (
     moved: [],
     closed: [],
     refreshed: [],
-    composed: 0,
     undone: 0,
   }
 
@@ -153,7 +149,6 @@ const makeHarness = (
     },
     onClose: (key) => calls.closed.push(key),
     onRefresh: (key) => calls.refreshed.push(key),
-    onCompose: () => calls.composed++,
     ...options.deps,
   })
   handler.attach()
@@ -201,51 +196,31 @@ Deno.test("createKeyboardHandler - arrows are ignored when no column is focused"
   })
 })
 
-Deno.test("createKeyboardHandler - ArrowDown walks the column's navigable items", () => {
-  const columns = [makeColumn("a", { items: 3 })]
-  withHarness({ columns }, ({ stub, columns: [column] }) => {
-    stub.press("ArrowDown")
-    const items = Array.from(column?.querySelectorAll("[data-navigable]") ?? [])
-    assertEquals(items[0]?.hasAttribute("data-keyboard-focus"), true)
-
-    stub.press("ArrowDown")
-    assertEquals(items[0]?.hasAttribute("data-keyboard-focus"), false)
-    assertEquals(items[1]?.hasAttribute("data-keyboard-focus"), true)
-
-    stub.press("ArrowUp")
-    assertEquals(items[0]?.hasAttribute("data-keyboard-focus"), true)
+Deno.test("createKeyboardHandler - a keydown another handler already consumed is ignored", () => {
+  withHarness({}, ({ stub, calls }) => {
+    const { prevented } = stub.press("ArrowRight", { defaultPrevented: true })
+    assertEquals(prevented, false)
+    assertEquals(calls.focused, [])
   })
 })
 
-Deno.test("createKeyboardHandler - Enter activates the focused navigable item", () => {
-  const columns = [makeColumn("a", { items: 1 })]
-  withHarness({ columns }, ({ stub, columns: [column] }) => {
-    stub.press("ArrowDown")
-    stub.press("Enter")
-    const item = column?.querySelector("[data-navigable]")
-    assertEquals(item ? Reflect.get(item, "__clicked") : undefined, true)
-  })
-})
-
-Deno.test("createKeyboardHandler - Escape clears item focus and blurs the active element", () => {
-  const columns = [makeColumn("a", { items: 1 })]
-  withHarness({ columns }, ({ stub, columns: [column] }) => {
+Deno.test("createKeyboardHandler - Escape blurs the active element", () => {
+  withHarness({}, ({ stub, columns: [column] }) => {
     const heading = column?.querySelector("h2")
     if (!(heading instanceof HTMLElement)) throw new Error("heading missing")
     stub.setActiveElement(heading)
-    stub.press("ArrowDown")
     stub.press("Escape")
-    assertEquals(column?.querySelector("[data-keyboard-focus]"), null)
-    assertEquals(Reflect.get(heading, "__blurred"), true)
+    assertEquals(stub.activeElement(), null)
   })
 })
 
 Deno.test("createKeyboardHandler - a consuming onEscape pre-handler stops further escape handling", () => {
-  const columns = [makeColumn("a", { items: 1 })]
-  withHarness({ columns, deps: { onEscape: () => true } }, ({ stub, columns: [column] }) => {
-    stub.press("ArrowDown")
+  withHarness({ deps: { onEscape: () => true } }, ({ stub, columns: [column] }) => {
+    const heading = column?.querySelector("h2")
+    if (!(heading instanceof HTMLElement)) throw new Error("heading missing")
+    stub.setActiveElement(heading)
     stub.press("Escape")
-    assertEquals(column?.querySelector("[data-keyboard-focus]") !== null, true)
+    assertEquals(stub.activeElement(), heading)
   })
 })
 
@@ -272,32 +247,42 @@ Deno.test("createKeyboardHandler - Ctrl+Z and Cmd+Z trigger undo; plain z does n
   })
 })
 
-Deno.test("createKeyboardHandler - x closes the keyboard-focused unpinned column", () => {
+Deno.test("createKeyboardHandler - x closes the unpinned column that contains the active element", () => {
   withHarness({}, ({ stub, columns, calls }) => {
-    const header = columns[0]?.querySelector("header")
-    if (!(header instanceof HTMLElement)) throw new Error("header missing")
-    header.dataset.keyboardFocus = ""
+    const heading = columns[0]?.querySelector("h2")
+    if (!(heading instanceof HTMLElement)) throw new Error("heading missing")
+    stub.setActiveElement(heading)
     stub.press("x")
     assertEquals(calls.closed, ["a"])
   })
 })
 
+Deno.test("createKeyboardHandler - x closes the column holding focus even when another column was focused last", () => {
+  withHarness({ focusedColumn: 0 }, ({ stub, columns, calls }) => {
+    const heading = columns[1]?.querySelector("h2")
+    if (!(heading instanceof HTMLElement)) throw new Error("heading missing")
+    stub.setActiveElement(heading)
+    stub.press("x")
+    assertEquals(calls.closed, ["b"])
+  })
+})
+
 Deno.test("createKeyboardHandler - Ctrl+X does not close the column", () => {
   withHarness({}, ({ stub, columns, calls }) => {
-    const header = columns[0]?.querySelector("header")
-    if (!(header instanceof HTMLElement)) throw new Error("header missing")
-    header.dataset.keyboardFocus = ""
+    const heading = columns[0]?.querySelector("h2")
+    if (!(heading instanceof HTMLElement)) throw new Error("heading missing")
+    stub.setActiveElement(heading)
     stub.press("x", { ctrlKey: true })
     assertEquals(calls.closed, [])
   })
 })
 
-Deno.test("createKeyboardHandler - x is ignored for pinned columns and unfocused headers", () => {
+Deno.test("createKeyboardHandler - x is ignored for pinned columns and columns without focus", () => {
   const columns = [makeColumn("a", { pinned: true }), makeColumn("b")]
   withHarness({ columns }, ({ stub, columns: [pinned], calls }) => {
-    const header = pinned?.querySelector("header")
-    if (!(header instanceof HTMLElement)) throw new Error("header missing")
-    header.dataset.keyboardFocus = ""
+    const heading = pinned?.querySelector("h2")
+    if (!(heading instanceof HTMLElement)) throw new Error("heading missing")
+    stub.setActiveElement(heading)
     stub.press("x")
     assertEquals(calls.closed, [])
   })
@@ -308,14 +293,6 @@ Deno.test("createKeyboardHandler - r refreshes the focused column; Ctrl+R is lef
     stub.press("r")
     stub.press("r", { ctrlKey: true })
     assertEquals(calls.refreshed, ["a"])
-  })
-})
-
-Deno.test("createKeyboardHandler - c fires onCompose; Cmd+C is left to the browser", () => {
-  withHarness({}, ({ stub, calls }) => {
-    stub.press("c")
-    stub.press("c", { metaKey: true })
-    assertEquals(calls.composed, 1)
   })
 })
 

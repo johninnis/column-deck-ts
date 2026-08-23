@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/johninnis/column-deck-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/johninnis/column-deck-ts/actions/workflows/ci.yml)
 
-The multi-column UI framework. Lifecycle, registry, mount/teardown, drag-to-reorder, keyboard shortcuts, mobile back-stack, sessionStorage-backed persistence. Domain-agnostic — every column is a black box that defines its own assets, render hook, and teardown. The framework knows nothing about what a column displays or where its data comes from.
+The multi-column UI framework. Lifecycle, registry, mount/teardown, drag-to-reorder, column-level keyboard shortcuts, mobile back-stack, layout persistence — with browser defaults for the shell, asset loading, persistence and the mobile breakpoint, each overridable. Domain-agnostic — every column is a black box that defines its own assets, render hook, and teardown. The framework knows nothing about what a column displays or where its data comes from.
 
 ## Install
 
@@ -59,19 +59,6 @@ const taskDetailColumn = createColumnDefinition<Services>({
     },
 })
 
-// These columns declare no css/html/js assets, so the loader's load hooks are inert.
-// A real loader dedups and injects <link>/<template>/<script> elements per path.
-const assetLoader = {
-    loadCss: (): Promise<void> => Promise.resolve(),
-    loadHtml: (): Promise<void> => Promise.resolve(),
-    loadJs: (): Promise<void> => Promise.resolve(),
-    cloneTemplate: (id: string): DocumentFragment => {
-        const template = document.getElementById(id)
-        if (!(template instanceof HTMLTemplateElement)) throw new Error(`Missing template: ${id}`)
-        return document.importNode(template.content, true)
-    },
-}
-
 const mountElement = document.querySelector("main")
 if (!(mountElement instanceof HTMLElement)) throw new Error("Missing mount element")
 
@@ -79,18 +66,14 @@ const taskStore = createTaskStore() // your data layer
 
 const system = await createColumnDeck({
     mountElement,
-    assetLoader,
-    persistence: {
-        save: (data) => sessionStorage.setItem("columns", data),
-        load: () => sessionStorage.getItem("columns"),
-    },
-    isMobile: () => !matchMedia("(min-width: 768px)").matches,
     columnDefinitions: [taskListColumn, taskDetailColumn],
     services: { taskStore },
 })
 
 await system.launchColumn("task-list")
 ```
+
+Nothing else is required: the deck supplies the column shell, a browser asset loader, sessionStorage persistence and a 768px mobile breakpoint. Override any of them on `createColumnDeck` (below). Keys that act inside a column — and your own application shortcuts — are yours to bind; see *Drag + keyboard*.
 
 ## Public surface
 
@@ -99,21 +82,26 @@ await system.launchColumn("task-list")
 ```ts
 const system = await createColumnDeck({
     mountElement,
-    assetLoader,
-    persistence,                  // PersistenceAdapter — { save, load }
-    isMobile,                     // () => boolean
+    columnDefinitions?,           // pre-registered ColumnDefinition<S>[]
+    services,                     // S — the dependency bag every column receives
+    assetLoader?,                 // AssetLoader — default createBrowserAssetLoader()
+    shellTemplate?,               // () => DocumentFragment — default: the deck's own shell (below)
+    persistence?,                 // PersistenceAdapter — default createSessionStoragePersistence()
+    isMobile?,                    // () => boolean — default !matchMedia("(min-width: 768px)").matches
     initialMobileHistory?,        // seed for the deck-owned mobile back-stack
     assetPaths?,                  // ColumnAssetPaths — shared css/templates loaded once at init
     onPinnedColumnsChange?,       // pinned-columns listener
     onMobileHistoryChange?,       // mobile back-stack listener
-    onCompose?,                   // `c` shortcut handler
     onEscape?,                    // Escape pre-handler — return true to consume the key
-    columnDefinitions?,           // pre-registered ColumnDefinition<S>[]
-    services,                     // S — the dependency bag every column receives
 })
 ```
 
-Returns a `ColumnDeck` with `launchColumn`, `closeColumn`, `refreshColumn`, `undo` (re-open last closed), `goBack` (mobile-history pop), `getState`, `getColumnCount`, `getMobileHistory`, `setPinned`, and `destroy` (close every open column — running each column's teardowns — and detach the drag/keyboard handlers and observers).
+Only `mountElement`, `services` and the column definitions are the host's to supply. The four infrastructure
+seams default to the deck's browser implementations and are overridable: pass your own `AssetLoader` when
+templates live somewhere other than fetched HTML files, your own `shellTemplate` to restyle the column chrome,
+your own `PersistenceAdapter` to key the layout per user, your own `isMobile` for a different breakpoint.
+
+Returns a `ColumnDeck` with `launchColumn`, `closeColumn`, `refreshColumn`, `undo` (re-open last closed), `goBack` (mobile-history pop), `getState`, `getColumnCount`, `getFocusedColumnElement` (the last-focused column's element, so the host can bind keys that act inside a column — the deck itself binds only column-level keys), `getMobileHistory`, `setPinned`, and `destroy` (close every open column — running each column's teardowns — and detach the drag/keyboard handlers and observers).
 
 Launching an unregistered column type rejects with `ColumnLifecycleError` before any state changes.
 
@@ -124,6 +112,34 @@ The layout is written to `persistence.save` on every state change (desktop only)
 `createColumnDeck<S>` is generic over the services type: the `services` value and every registered `ColumnDefinition<S>` must agree on `S`, checked at the call site. A definition declaring a narrower services requirement is assignable to a system holding a wider bag.
 
 `createColumnDeck` is the only construction surface most callers need. It wires the registry, manager, renderer, drag handler, keyboard handler, and shell renderer in one call.
+
+### Asset loader — `browser-asset-loader.ts`
+
+`createBrowserAssetLoader()` is the default `AssetLoader`: each CSS path becomes one `<link>` and each JS path one
+`<script type="module">` in `document.head` (deduplicated per path, in flight or done); each HTML path is fetched
+once and every `<template>` in it is registered by id; `cloneTemplate(id)` returns a fresh fragment of a registered
+template, and fills any `[data-partial="<id>"]` element inside it with a clone of template `<id>` (one pass, not
+recursive). A missing template or a failed load throws `ColumnLifecycleError`. Column definitions' `css`/`html`/`js`
+paths and `assetPaths` go through whichever loader the deck was given, so a host that constructs its own loader
+should pass that instance in and reuse it for its own cloning.
+
+### Shell template — `shell-template.ts`
+
+Every column is mounted into a clone of the shell. The default shell is text-labelled chrome; override it with
+`shellTemplate: () => DocumentFragment` (for example `() => assetLoader.cloneTemplate("my-shell")`) to restyle
+it. A custom shell must contain, and the deck throws `ColumnLifecycleError` if it lacks: a single root element,
+a `header` (the drag handle) holding `[data-title]`, `[data-pin-btn]`, `[data-lists-wrapper]` with
+`[data-lists-btn]` and `[data-lists-list]`, `[data-menu-wrapper]` with `[data-menu-btn]` and `[data-menu-list]`,
+`[data-refresh-btn]` and `[data-close-btn]`; and a `[data-content]` element. Chrome a definition turns off
+(`hasClose: false` and friends) is removed from the clone.
+
+### Styling contract
+
+The deck ships no CSS. It marks state with attributes for the host's stylesheet: `[data-column]` and
+`[data-column-key]` on every shell root, `[data-pinned]`, `[data-dragging]`, `[data-visible]` on an open
+`[data-menu-list]`/`[data-lists-list]`, `[data-separator]`, `[data-variant]` and `[data-selected]` on menu entries,
+`[data-loading]` on the loading indicator, `[data-status-bar]` on the title, and `[hidden]`. Column focus lands on the
+header `h2`, so `header:focus-within` styles the focused column.
 
 ### Column definition — `column-base.ts`
 
@@ -207,11 +223,11 @@ Internal. The renderer mounts each column's chrome (header, refresh button, menu
 
 ### Drag + keyboard — `drag-handler.ts`, `keyboard-handler.ts`
 
-Internal. Both are scoped to the deck's mount element. The drag handler tracks pointer events on column headers and reorders via the manager. The keyboard handler (active outside inputs) binds: `ArrowLeft`/`ArrowRight` focus the previous/next column (with `Shift`: move the column), `ArrowUp`/`ArrowDown` walk a column's `[data-navigable]` items, `Enter` activates the focused item, `Escape` clears focus and blurs (after the host's `onEscape` pre-handler), `Ctrl`/`Cmd`+`Z` re-opens the last closed column, `Home`/`End` scroll the column, `x` closes the keyboard-focused unpinned column, `r` refreshes, `c` fires `onCompose`. Browser shortcuts (`Ctrl`/`Cmd` + `x`/`r`/`c`) are left alone. Both handlers are wired by `createColumnDeck`.
+Internal. Both are scoped to the deck's mount element. The drag handler tracks pointer events on column headers and reorders via the manager. The keyboard handler (active outside inputs) binds: `ArrowLeft`/`ArrowRight` focus the previous/next column (with `Shift`: move the column), `Escape` blurs the active element (after the host's `onEscape` pre-handler), `Ctrl`/`Cmd`+`Z` re-opens the last closed column, `Home`/`End` scroll the column, `x` closes the unpinned column that contains the active element, `r` refreshes. Browser shortcuts (`Ctrl`/`Cmd` + `x`/`r`) are left alone, as is any keydown another handler has already `preventDefault`ed. Application shortcuts (launching a particular column, say) and keys that act *inside* a column (walking its items, activating one) are the host's: bind them on `document`, resolve the column with `getFocusedColumnElement()`, and `preventDefault` what you consume. Column focus lands on the header `h2` (style `header:focus-within`). Both handlers are wired by `createColumnDeck`.
 
 ### Errors — `errors.ts`
 
-`ColumnLifecycleError` — a tagged `Error` (`tag: "ColumnLifecycleError"`) for framework-lifecycle violations: launching or mounting an unregistered column type (`column-manager.ts`, `column-renderer.ts`), or a required shell element or template root missing (`column-shell.ts`).
+`ColumnLifecycleError` — a tagged `Error` (`tag: "ColumnLifecycleError"`) for framework-lifecycle violations: launching or mounting an unregistered column type (`column-manager.ts`, `column-renderer.ts`), a required shell element or shell root missing (`column-shell.ts`), or, in the browser asset loader, cloning an unregistered template id or failing to load an HTML or JS asset (`browser-asset-loader.ts`).
 
 ## Lifecycle
 
@@ -223,7 +239,7 @@ launchColumn(type, entityId)
     ├─ definition.loadAssets(assetLoader)        -- runs every render; the asset loader dedups
     │
     ├─ manager creates Column { type, entityId, key, ... }
-    ├─ renderer mounts shell + content element
+    ├─ renderer clones the shell template and mounts it
     │
     ├─ definition.onRender(content, context)     -- your code runs here
     │
@@ -243,4 +259,4 @@ launchColumn(type, entityId)
 - **Holding a reference to a column's content element outside its lifecycle.** It's removed from the DOM on close; references become stale. Put long-lived refs into `context.state` so they're cleaned up by `onDestroy`.
 - **Subscribing to data sources / DOM events without `context.onTeardown`.** Anything that survives `onDestroy` is a leak. Always register a teardown for every subscription.
 - **Talking to other columns directly.** Use `context.launchColumn(type, entityId)` — the registry resolves and the manager mounts. Reaching into another column's DOM bypasses its lifecycle.
-- **Loading assets manually inside `onRender`.** Pass them in the definition's `css`/`html`/`js` keys; the renderer calls `loadAssets` for you, and the supplied asset loader is responsible for caching.
+- **Loading assets manually inside `onRender`.** Pass them in the definition's `css`/`html`/`js` keys; the renderer calls `loadAssets` for you, and the asset loader (the browser default or your own) dedups per path.

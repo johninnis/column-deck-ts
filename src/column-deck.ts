@@ -7,24 +7,29 @@ import { createColumnManager } from "./column-manager.ts"
 import { createDragHandler } from "./drag-handler.ts"
 import { createKeyboardHandler } from "./keyboard-handler.ts"
 import { createColumnRegistry } from "./column-registry.ts"
+import { createBrowserAssetLoader } from "./browser-asset-loader.ts"
+import { createSessionStoragePersistence } from "./column-persistence.ts"
+import { defaultShellTemplate, type ShellTemplate } from "./shell-template.ts"
 
-/** Everything the host injects into {@linkcode createColumnDeck}: mount point, asset loader, persistence, callbacks, column definitions, and services. */
+const isNarrowViewport = (): boolean => !matchMedia("(min-width: 768px)").matches
+
+/** What the host hands {@linkcode createColumnDeck}: the mount point, column definitions and services, plus optional overrides for the asset loader, shell template, persistence and mobile breakpoint (each defaults to the deck's browser implementation) and the lifecycle callbacks. */
 interface ColumnDeckDeps<S extends ColumnServices = ColumnServices> {
   readonly mountElement: HTMLElement
-  readonly assetLoader: AssetLoader
-  readonly persistence: PersistenceAdapter
-  readonly isMobile: () => boolean
+  readonly assetLoader?: AssetLoader
+  readonly shellTemplate?: ShellTemplate
+  readonly persistence?: PersistenceAdapter
+  readonly isMobile?: () => boolean
   readonly initialMobileHistory?: ReadonlyArray<MobileHistoryEntry>
   readonly assetPaths?: ColumnAssetPaths
   readonly onPinnedColumnsChange?: ((columns: ReadonlyArray<{ type: string; entityId: string | null }>) => void) | null
   readonly onMobileHistoryChange?: () => void
-  readonly onCompose?: () => void
   readonly onEscape?: () => boolean
   readonly columnDefinitions?: ReadonlyArray<ColumnDefinition<S>>
   readonly services: S
 }
 
-/** The running column deck: launch, close, refresh, undo, back navigation, pinning, state inspection, and teardown. */
+/** The running column deck: launch, close, refresh, undo, back navigation, pinning, state inspection (including the focused column's element, for host-side keyboard handling inside a column), and teardown. */
 interface ColumnDeck {
   readonly launchColumn: (type: string, entityId?: string | null) => Promise<string>
   readonly closeColumn: (key: ColumnKey) => void
@@ -33,6 +38,7 @@ interface ColumnDeck {
   readonly goBack: () => Promise<void>
   readonly getState: () => ColumnState
   readonly getColumnCount: () => number
+  readonly getFocusedColumnElement: () => HTMLElement | null
   readonly getMobileHistory: () => ReadonlyArray<MobileHistoryEntry>
   readonly setPinned: (key: ColumnKey, pinned: boolean) => void
   readonly destroy: () => void
@@ -46,14 +52,14 @@ interface ColumnDeck {
  */
 const createColumnDeck = async <S extends ColumnServices = ColumnServices>({
   mountElement,
-  assetLoader,
-  persistence,
-  isMobile,
+  assetLoader = createBrowserAssetLoader(),
+  shellTemplate = defaultShellTemplate,
+  persistence = createSessionStoragePersistence(),
+  isMobile = isNarrowViewport,
   initialMobileHistory,
   assetPaths,
   onPinnedColumnsChange = null,
   onMobileHistoryChange,
-  onCompose,
   onEscape,
   columnDefinitions = [],
   services,
@@ -66,6 +72,7 @@ const createColumnDeck = async <S extends ColumnServices = ColumnServices>({
     mountElement,
     persistence,
     assetLoader,
+    shellTemplate,
     assetPaths,
     columnRegistry,
     isMobile,
@@ -89,7 +96,6 @@ const createColumnDeck = async <S extends ColumnServices = ColumnServices>({
     onMoveColumn: manager.moveColumnKeyboard,
     onClose: manager.closeColumn,
     onRefresh: manager.refreshColumn,
-    onCompose,
     onEscape,
   })
 
@@ -111,6 +117,7 @@ const createColumnDeck = async <S extends ColumnServices = ColumnServices>({
     goBack: manager.goBack,
     getState: manager.getState,
     getColumnCount: manager.getColumnCount,
+    getFocusedColumnElement: manager.getLastFocusedElement,
     getMobileHistory: manager.getMobileHistory,
     setPinned: manager.setPinned,
     destroy,

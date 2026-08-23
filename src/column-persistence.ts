@@ -6,6 +6,13 @@ interface PersistenceAdapter {
   readonly load: () => string | null
 }
 
+/** A {@linkcode PersistenceAdapter} over `sessionStorage`, keyed by `key`; the deck's default. */
+const createSessionStoragePersistence = (key = "column-deck"): PersistenceAdapter =>
+  Object.freeze({
+    save: (data: string): void => sessionStorage.setItem(key, data),
+    load: (): string | null => sessionStorage.getItem(key),
+  })
+
 interface SavedColumn {
   readonly type: string
   readonly entityId: string | null
@@ -44,4 +51,4 @@ const serialiseColumns = (state: ColumnState): string =>
   })
 
 export type { PersistenceAdapter, SavedColumn }
-export { parseSavedColumns, serialiseColumns }
+export { createSessionStoragePersistence, parseSavedColumns, serialiseColumns }
