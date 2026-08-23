@@ -73,7 +73,7 @@ const system = await createColumnDeck({
 await system.launchColumn("task-list")
 ```
 
-Nothing else is required: the deck supplies the column shell, a browser asset loader, sessionStorage persistence and a 768px mobile breakpoint. Override any of them on `createColumnDeck` (below). Keys that act inside a column — and your own application shortcuts — are yours to bind; see *Drag + keyboard*.
+Nothing else is required: the deck supplies the column shell, a browser asset loader, sessionStorage persistence and a 768px mobile breakpoint. Override any of them on `createColumnDeck` (below). Keys that act inside a column — and your own application shortcuts — are yours to bind; see *Drag + keyboard*. A runnable version of exactly this, with those host-side keys and the stylesheet for the deck's attributes, is `examples/minimal-host/` (`deno task example:minimal-host`, then http://localhost:8088).
 
 ## Public surface
 

@@ -1,0 +1,116 @@
+:root {
+  --colour-text: #1d1d1f;
+  --colour-text-muted: #6e6e73;
+  --colour-surface: #ffffff;
+  --colour-surface-raised: #f5f5f7;
+  --colour-border: #d2d2d7;
+  --colour-accent: #0a66c2;
+  --space: 0.5rem;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  color: var(--colour-text);
+  background: var(--colour-surface-raised);
+}
+
+main {
+  display: flex;
+  gap: var(--space);
+  padding: var(--space);
+  height: 100vh;
+  overflow-x: auto;
+  box-sizing: border-box;
+}
+
+[data-column] {
+  flex: 0 0 20rem;
+  display: flex;
+  flex-direction: column;
+  background: var(--colour-surface);
+  border: 1px solid var(--colour-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+[data-column][data-dragging] {
+  opacity: 0.5;
+}
+
+[data-column] > header {
+  display: flex;
+  align-items: center;
+  gap: var(--space);
+  padding: var(--space);
+  border-bottom: 1px solid var(--colour-border);
+}
+
+[data-column] > header:focus-within {
+  background: var(--colour-surface-raised);
+}
+
+[data-column] > header h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 1rem;
+}
+
+[data-column] > header nav {
+  display: flex;
+  gap: 0.25rem;
+}
+
+[data-column] > header nav > div {
+  position: relative;
+}
+
+[data-menu-list],
+[data-lists-list] {
+  position: absolute;
+  inset-inline-end: 0;
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  background: var(--colour-surface);
+  border: 1px solid var(--colour-border);
+  border-radius: 0.25rem;
+}
+
+[data-menu-list]:not([data-visible]),
+[data-lists-list]:not([data-visible]) {
+  display: none;
+}
+
+[data-content] {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space);
+}
+
+[data-content] ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+[data-content] [data-navigable] {
+  display: block;
+  padding: var(--space);
+  border-bottom: 1px solid var(--colour-border);
+}
+
+[data-content] [data-navigable]:focus-visible,
+button:focus-visible,
+h2:focus-visible {
+  outline: 2px solid var(--colour-accent);
+  outline-offset: -2px;
+}
+
+[data-loading] {
+  color: var(--colour-text-muted);
+}
+
+[hidden] {
+  display: none;
+}

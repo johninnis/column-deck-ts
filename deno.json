@@ -2,7 +2,7 @@
   "name": "@innis/column-deck",
   "version": "0.2.0",
   "publish": {
-    "exclude": ["tests/", "deno.lock", ".github/"]
+    "exclude": ["tests/", "examples/", "deno.lock", ".github/"]
   },
   "minimumDependencyAge": {
     "age": "PT24H",
@@ -28,7 +28,8 @@
     "deno-dom": "https://deno.land/x/deno_dom@v0.1.48/deno-dom-wasm.ts"
   },
   "tasks": {
-    "check": "deno check mod.ts src/ tests/",
+    "check": "deno check mod.ts src/ tests/ examples/",
+    "example:minimal-host": "deno bundle --platform browser --outdir examples/minimal-host/dist examples/minimal-host/main.ts && deno run --allow-net --allow-read jsr:@std/http@^1/file-server examples/minimal-host --port 8088",
     "lint": "deno lint",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check",
