@@ -37,14 +37,8 @@ interface ListSelection {
   readonly btn: HTMLButtonElement | null
 }
 
-/** The shape of a column's per-mount mutable state; column authors supply the concrete type. */
-type ColumnStateShape = object
-
-/** Everything a column's hooks receive: launch/teardown plumbing, header controls, per-mount state, and the injected services. */
-interface ColumnContext<
-  S extends ColumnServices = ColumnServices,
-  State extends ColumnStateShape = Record<string, unknown>,
-> {
+/** Everything a column's render receives: launch/teardown plumbing, header controls, and the injected services. */
+interface ColumnContext<S extends ColumnServices = ColumnServices> {
   readonly entityId: string | null
   readonly launchColumn: (type: string, entityId?: string | null) => Promise<string>
   readonly updateTitle: (title: string) => void
@@ -57,16 +51,17 @@ interface ColumnContext<
   readonly hideLoading: () => void
   readonly onTeardown: (fn: () => void) => void
   readonly trackHandle: <T extends { readonly abort: () => void }>(handle: T) => T
-  readonly state: State
+  /** Aborts when this render's teardowns run; pass it as `{ signal }` to `addEventListener`. */
+  readonly signal: AbortSignal
   readonly services: S
 }
 
 /** Launches a column of the given type, optionally bound to an entity id, and resolves with the column key. */
 type ColumnLaunchFn = ColumnContext["launchColumn"]
-/** The context the framework passes to a {@linkcode ColumnDefinition}; the definition wraps it with per-mount state, loading indicators, and teardown tracking. */
+/** The context the framework passes to a {@linkcode ColumnDefinition}; the definition wraps it with loading indicators and teardown tracking. */
 type OuterColumnContext<S extends ColumnServices = ColumnServices> = Omit<
   ColumnContext<S>,
-  "showLoading" | "hideLoading" | "onTeardown" | "trackHandle" | "state"
+  "showLoading" | "hideLoading" | "onTeardown" | "trackHandle" | "signal"
 >
 
 /** The framework-facing column contract produced by {@linkcode createColumnDefinition}: asset loading, render/refresh, and lifecycle hooks. */
@@ -83,24 +78,30 @@ interface ColumnDefinition<S extends ColumnServices = ColumnServices> {
   readonly loadAssets: (assetLoader: AssetLoader) => Promise<void>
   readonly render: (contentElement: HTMLElement, context: OuterColumnContext<S>) => Promise<void>
   readonly refresh: (contentElement: HTMLElement, context: OuterColumnContext<S>) => Promise<void>
-  readonly onMenuSelect:
-    | ((contentElement: HTMLElement, context: OuterColumnContext<S>, action: string) => Promise<void>)
-    | null
-  readonly onListSelect:
-    | ((contentElement: HTMLElement, context: OuterColumnContext<S>, selection: ListSelection) => Promise<void>)
-    | null
-  readonly onListsOpen: ((contentElement: HTMLElement, context: OuterColumnContext<S>) => Promise<void>) | null
+  readonly onMenuSelect: (contentElement: HTMLElement, action: string) => Promise<void>
+  readonly onListSelect: (contentElement: HTMLElement, selection: ListSelection) => Promise<void>
+  readonly onListsOpen: (contentElement: HTMLElement) => Promise<void>
   readonly onDestroy: (contentElement: HTMLElement) => void
 }
 
-/** A column's own refresh, returned from `onRender`: the refresh button calls it instead of re-rendering. */
-type ColumnRefresh = () => void | Promise<void>
+/**
+ * What a column's `onRender` hands the deck: how its refresh button, header menu and list selector act. Each is a
+ * closure over the render, so it works against the live DOM with the render's subscriptions intact. Each may act
+ * synchronously or return a promise.
+ */
+interface ColumnHandlers {
+  /** Refresh in place; without it the refresh button tears the column down and renders it again. */
+  readonly refresh?: (() => void | Promise<void>) | undefined
+  /** Act on the header menu item the user picked. */
+  readonly onMenuSelect?: ((action: string) => void | Promise<void>) | undefined
+  /** Act on the list selector entry the user picked. */
+  readonly onListSelect?: ((selection: ListSelection) => void | Promise<void>) | undefined
+  /** Fill the list selector as it opens. */
+  readonly onListsOpen?: (() => void | Promise<void>) | undefined
+}
 
 /** Author-facing options for {@linkcode createColumnDefinition}: assets, header behaviour, and lifecycle callbacks. */
-interface ColumnDefinitionParams<
-  S extends ColumnServices = ColumnServices,
-  State extends ColumnStateShape = Record<string, unknown>,
-> {
+interface ColumnDefinitionParams<S extends ColumnServices = ColumnServices> {
   readonly type: string
   readonly label: string
   readonly css?: string | ReadonlyArray<string> | null
@@ -109,7 +110,7 @@ interface ColumnDefinitionParams<
   /**
    * The id of a registered `<template>` whose clone replaces the content element's children before every
    * `onRender`. A column with a template gets no loading indicator from the deck, since the mount would remove it
-   * at once; a column that loads asynchronously calls `showLoading` itself.
+   * at once; a column that then waits on something calls `showLoading` itself.
    */
   readonly template?: string | null
   readonly hasClose?: boolean
@@ -120,28 +121,10 @@ interface ColumnDefinitionParams<
   readonly menuItems?: ReadonlyArray<MenuItem> | null
   readonly getTitle?: (entityId?: string | null) => string
   /**
-   * Render the column. Resolve with a {@linkcode ColumnRefresh} to have the refresh button refresh in place,
-   * against the live DOM with the render's subscriptions intact; resolve with nothing to have refresh tear
-   * down and render again.
+   * Render the column into its content element: into its mounted `template` when it declares one, otherwise over the
+   * deck's loading indicator. Resolve with the {@linkcode ColumnHandlers} the header controls should call.
    */
-  readonly onRender: (
-    contentElement: HTMLElement,
-    context: ColumnContext<S, State>,
-  ) => Promise<void | ColumnRefresh>
-  readonly onMenuSelect?:
-    | ((contentElement: HTMLElement, context: ColumnContext<S, State>, action: string) => void | Promise<void>)
-    | null
-  readonly onListSelect?:
-    | ((
-      contentElement: HTMLElement,
-      context: ColumnContext<S, State>,
-      selection: ListSelection,
-    ) => void | Promise<void>)
-    | null
-  readonly onListsOpen?:
-    | ((contentElement: HTMLElement, context: ColumnContext<S, State>) => void | Promise<void>)
-    | null
-  readonly onDestroy?: ((state: State, contentElement: HTMLElement) => void) | null
+  readonly onRender: (contentElement: HTMLElement, context: ColumnContext<S>) => Promise<void | ColumnHandlers>
 }
 
 const toArray = (value: string | ReadonlyArray<string> | null | undefined): ReadonlyArray<string> => {
@@ -150,13 +133,10 @@ const toArray = (value: string | ReadonlyArray<string> | null | undefined): Read
 }
 
 /**
- * Builds a {@linkcode ColumnDefinition} from author callbacks, wiring per-mount state,
- * teardown registration, loading indicators, and asset loading around them.
+ * Builds a {@linkcode ColumnDefinition} from author callbacks, wiring teardown registration, loading indicators,
+ * asset loading and the handlers each render returns around them.
  */
-const createColumnDefinition = <
-  S extends ColumnServices = ColumnServices,
-  State extends ColumnStateShape = Record<string, unknown>,
->({
+const createColumnDefinition = <S extends ColumnServices = ColumnServices>({
   type,
   label,
   css = null,
@@ -171,28 +151,10 @@ const createColumnDefinition = <
   menuItems = null,
   getTitle = () => label,
   onRender,
-  onMenuSelect = null,
-  onListSelect = null,
-  onListsOpen = null,
-  onDestroy = null,
-}: ColumnDefinitionParams<S, State>): ColumnDefinition<S> => {
-  const columnState = new WeakMap<HTMLElement, State>()
+}: ColumnDefinitionParams<S>): ColumnDefinition<S> => {
   const columnTeardowns = new WeakMap<HTMLElement, Array<() => void>>()
-  const columnRefreshes = new WeakMap<HTMLElement, ColumnRefresh>()
+  const columnHandlers = new WeakMap<HTMLElement, ColumnHandlers>()
   const renderGenerations = new WeakMap<HTMLElement, number>()
-
-  const getColumnState = (element: HTMLElement): State => {
-    let state = columnState.get(element)
-    if (!state) {
-      // State starts empty and is populated by the column's onRender. The framework is
-      // generic over State and cannot construct the author's concrete shape, so the empty
-      // seed is asserted at this boundary.
-      // deno-lint-ignore innis/no-type-assertions
-      state = {} as State
-      columnState.set(element, state)
-    }
-    return state
-  }
 
   const registerTeardown = (element: HTMLElement, fn: () => void): void => {
     let list = columnTeardowns.get(element)
@@ -238,34 +200,38 @@ const createColumnDefinition = <
     el.querySelector("[data-loading]")?.remove()
   }
 
-  const buildContext = (contentElement: HTMLElement, context: OuterColumnContext<S>): ColumnContext<S, State> => ({
-    ...context,
-    showLoading: () => showLoading(contentElement),
-    hideLoading: () => hideLoading(contentElement),
-    onTeardown: (fn: () => void): void => registerTeardown(contentElement, fn),
-    trackHandle: <T extends { readonly abort: () => void }>(handle: T): T => {
-      registerTeardown(contentElement, () => handle.abort())
-      return handle
-    },
-    state: getColumnState(contentElement),
-  })
+  const buildContext = (contentElement: HTMLElement, context: OuterColumnContext<S>): ColumnContext<S> => {
+    const lifetime = new AbortController()
+    registerTeardown(contentElement, () => lifetime.abort())
+    return {
+      ...context,
+      showLoading: () => showLoading(contentElement),
+      hideLoading: () => hideLoading(contentElement),
+      onTeardown: (fn: () => void): void => registerTeardown(contentElement, fn),
+      trackHandle: <T extends { readonly abort: () => void }>(handle: T): T => {
+        registerTeardown(contentElement, () => handle.abort())
+        return handle
+      },
+      signal: lifetime.signal,
+    }
+  }
 
   const render = async (contentElement: HTMLElement, context: OuterColumnContext<S>): Promise<void> => {
     runTeardowns(contentElement)
-    columnRefreshes.delete(contentElement)
+    columnHandlers.delete(contentElement)
     const generation = (renderGenerations.get(contentElement) ?? 0) + 1
     renderGenerations.set(contentElement, generation)
     if (template) contentElement.replaceChildren(context.cloneTemplate(template))
     else showLoading(contentElement)
-    const ownRefresh = await onRender(contentElement, buildContext(contentElement, context))
-    // A render that a newer render or a destroy overtook while it ran must not install its refresh.
-    if (ownRefresh && renderGenerations.get(contentElement) === generation) {
-      columnRefreshes.set(contentElement, ownRefresh)
+    const handlers = await onRender(contentElement, buildContext(contentElement, context))
+    // A render that a newer render or a destroy overtook while it ran must not install its handlers.
+    if (handlers && renderGenerations.get(contentElement) === generation) {
+      columnHandlers.set(contentElement, handlers)
     }
   }
 
   const refresh = async (contentElement: HTMLElement, context: OuterColumnContext<S>): Promise<void> => {
-    const ownRefresh = columnRefreshes.get(contentElement)
+    const ownRefresh = columnHandlers.get(contentElement)?.refresh
     if (ownRefresh) {
       await ownRefresh()
       return
@@ -273,31 +239,21 @@ const createColumnDefinition = <
     await render(contentElement, context)
   }
 
-  const wrappedOnMenuSelect = onMenuSelect
-    ? async (contentElement: HTMLElement, context: OuterColumnContext<S>, action: string): Promise<void> => {
-      await onMenuSelect(contentElement, buildContext(contentElement, context), action)
-    }
-    : null
+  const onMenuSelect = async (contentElement: HTMLElement, action: string): Promise<void> => {
+    await columnHandlers.get(contentElement)?.onMenuSelect?.(action)
+  }
 
-  const wrappedOnListSelect = onListSelect
-    ? async (contentElement: HTMLElement, context: OuterColumnContext<S>, selection: ListSelection): Promise<void> => {
-      await onListSelect(contentElement, buildContext(contentElement, context), selection)
-    }
-    : null
+  const onListSelect = async (contentElement: HTMLElement, selection: ListSelection): Promise<void> => {
+    await columnHandlers.get(contentElement)?.onListSelect?.(selection)
+  }
 
-  const wrappedOnListsOpen = onListsOpen
-    ? async (contentElement: HTMLElement, context: OuterColumnContext<S>): Promise<void> => {
-      await onListsOpen(contentElement, buildContext(contentElement, context))
-    }
-    : null
+  const onListsOpen = async (contentElement: HTMLElement): Promise<void> => {
+    await columnHandlers.get(contentElement)?.onListsOpen?.()
+  }
 
-  const wrappedOnDestroy = (contentElement: HTMLElement): void => {
+  const onDestroy = (contentElement: HTMLElement): void => {
     runTeardowns(contentElement)
-    if (onDestroy) {
-      onDestroy(getColumnState(contentElement), contentElement)
-    }
-    columnState.delete(contentElement)
-    columnRefreshes.delete(contentElement)
+    columnHandlers.delete(contentElement)
     renderGenerations.delete(contentElement)
   }
 
@@ -314,10 +270,10 @@ const createColumnDefinition = <
     loadAssets,
     render,
     refresh,
-    onMenuSelect: wrappedOnMenuSelect,
-    onListSelect: wrappedOnListSelect,
-    onListsOpen: wrappedOnListsOpen,
-    onDestroy: wrappedOnDestroy,
+    onMenuSelect,
+    onListSelect,
+    onListsOpen,
+    onDestroy,
   })
 }
 
@@ -326,10 +282,9 @@ export type {
   ColumnContext,
   ColumnDefinition,
   ColumnDefinitionParams,
+  ColumnHandlers,
   ColumnLaunchFn,
-  ColumnRefresh,
   ColumnServices,
-  ColumnStateShape,
   ListSelection,
   MenuAction,
   MenuItem,

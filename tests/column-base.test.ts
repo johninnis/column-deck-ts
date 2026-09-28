@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert"
 import { createColumnDefinition } from "../src/column-base.ts"
+import type { ListSelection } from "../src/column-base.ts"
 import {
   createMockAssetLoader,
   createMockElement,
@@ -173,36 +174,26 @@ Deno.test("createColumnDefinition - render calls onRender", async () => {
   }
 })
 
-Deno.test("createColumnDefinition - onMenuSelect is null when not provided", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    onRender: () => Promise.resolve(),
-  })
-
-  assertEquals(def.onMenuSelect, null)
-})
-
-Deno.test("createColumnDefinition - onDestroy cleans up column state", async () => {
+Deno.test("createColumnDefinition - onDestroy runs the render's teardowns", async () => {
   installDocumentMock()
   try {
-    let destroyCalled = false
-    const { loader } = createMockAssetLoader()
+    let tornDown = false
     const def = createColumnDefinition({
       type: "test",
       label: "Test",
-      onRender: () => Promise.resolve(),
-      onDestroy: () => {
-        destroyCalled = true
+      onRender: (_el, context) => {
+        context.onTeardown(() => {
+          tornDown = true
+        })
+        return Promise.resolve()
       },
     })
 
-    await def.loadAssets(loader)
     const el = createMockElement()
     await def.render(el, createMockOuterContext())
     def.onDestroy(el)
 
-    assertEquals(destroyCalled, true)
+    assertEquals(tornDown, true)
   } finally {
     removeDocumentMock()
   }
@@ -262,25 +253,24 @@ Deno.test("createColumnDefinition - refresh re-renders when onRender returned no
   }
 })
 
-Deno.test("createColumnDefinition - onMenuSelect wrapper invokes the handler with the action", async () => {
+Deno.test("createColumnDefinition - a menu selection reaches the handler the render returned", async () => {
   installDocumentMock()
   try {
     let received: string | null = null
-    const { loader } = createMockAssetLoader()
     const def = createColumnDefinition({
       type: "test",
       label: "Test",
-      onRender: () => Promise.resolve(),
-      onMenuSelect: (_el, _ctx, action) => {
-        received = action
-      },
+      onRender: () =>
+        Promise.resolve({
+          onMenuSelect: (action: string): void => {
+            received = action
+          },
+        }),
     })
 
-    await def.loadAssets(loader)
     const el = createMockElement()
     await def.render(el, createMockOuterContext())
-    if (!def.onMenuSelect) throw new Error("expected onMenuSelect to be defined")
-    await def.onMenuSelect(el, createMockOuterContext(), "sort")
+    await def.onMenuSelect(el, "sort")
 
     assertEquals(received, "sort")
   } finally {
@@ -288,40 +278,29 @@ Deno.test("createColumnDefinition - onMenuSelect wrapper invokes the handler wit
   }
 })
 
-Deno.test("createColumnDefinition - onListSelect wrapper invokes the handler with the action", async () => {
+Deno.test("createColumnDefinition - a list selection reaches the handler the render returned", async () => {
   installDocumentMock()
   try {
     let received: string | null = null
-    const { loader } = createMockAssetLoader()
     const def = createColumnDefinition({
       type: "test",
       label: "Test",
-      onRender: () => Promise.resolve(),
-      onListSelect: (_el, _ctx, { action }) => {
-        received = action
-      },
+      onRender: () =>
+        Promise.resolve({
+          onListSelect: ({ action }: ListSelection): void => {
+            received = action
+          },
+        }),
     })
 
-    await def.loadAssets(loader)
     const el = createMockElement()
     await def.render(el, createMockOuterContext())
-    if (!def.onListSelect) throw new Error("expected onListSelect to be defined")
-    await def.onListSelect(el, createMockOuterContext(), { action: "add", btn: null })
+    await def.onListSelect(el, { action: "add", btn: null })
 
     assertEquals(received, "add")
   } finally {
     removeDocumentMock()
   }
-})
-
-Deno.test("createColumnDefinition - onListSelect is null when not provided", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    onRender: () => Promise.resolve(),
-  })
-
-  assertEquals(def.onListSelect, null)
 })
 
 Deno.test("createColumnDefinition - returned object is frozen", () => {
@@ -341,29 +320,43 @@ Deno.test("createColumnDefinition - hasPin defaults to true and can be disabled"
   assertEquals(withoutPin.hasPin, false)
 })
 
-Deno.test("createColumnDefinition - onListsOpen is null when not provided", () => {
-  const def = createColumnDefinition({ type: "test", label: "Test", onRender: () => Promise.resolve() })
-  assertEquals(def.onListsOpen, null)
-})
-
-Deno.test("createColumnDefinition - onListsOpen wrapper invokes the handler with the column context", async () => {
+Deno.test("createColumnDefinition - opening the list selector calls the handler the render returned", async () => {
   installDocumentMock()
   try {
     let opened = false
     const def = createColumnDefinition({
       type: "test",
       label: "Test",
-      onRender: () => Promise.resolve(),
-      onListsOpen: (_el, context) => {
-        opened = typeof context.onTeardown === "function"
-      },
+      onRender: () =>
+        Promise.resolve({
+          onListsOpen: (): void => {
+            opened = true
+          },
+        }),
     })
 
     const el = createMockElement()
-    if (!def.onListsOpen) throw new Error("expected onListsOpen to be defined")
-    await def.onListsOpen(el, createMockOuterContext())
+    await def.render(el, createMockOuterContext())
+    await def.onListsOpen(el)
 
     assertEquals(opened, true)
+  } finally {
+    removeDocumentMock()
+  }
+})
+
+Deno.test("createColumnDefinition - a header control whose handler the render did not return does nothing", async () => {
+  installDocumentMock()
+  try {
+    const def = createColumnDefinition({ type: "test", label: "Test", onRender: () => Promise.resolve({}) })
+
+    const el = createMockElement()
+    await def.render(el, createMockOuterContext())
+    await def.onMenuSelect(el, "sort")
+    await def.onListSelect(el, { action: "add", btn: null })
+    await def.onListsOpen(el)
+
+    assertEquals(Reflect.get(el, "children").length, 1)
   } finally {
     removeDocumentMock()
   }

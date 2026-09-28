@@ -2,8 +2,8 @@
  * The smallest useful host for @innis/column-deck: three column definitions, the deck with every
  * default in place, and the two things the deck deliberately leaves to the host — an application
  * shortcut (`k` launches a column) and in-column keys (ArrowUp/ArrowDown walk the focused column's
- * items, Enter activates one). The list column refreshes in place through the function its render
- * returns; the note column mounts a declared template instead of building its own markup.
+ * items, Enter activates one). The list column's render returns the handlers its refresh button and
+ * header menu call, closures over the render's own local state; the note column declares a template.
  *
  * Build and serve with `deno task example:minimal-host`, then open http://localhost:8088.
  */
@@ -30,10 +30,13 @@ const notes = (): ReadonlyArray<Note> => NOTES
 const listColumn = createColumnDefinition<Services>({
   type: "list",
   label: "Notes",
-  onRender: (content, { services, launchColumn, hideLoading }) => {
+  menuItems: [{ label: "Reverse the order", action: "reverse" }],
+  onRender: (content, { services, launchColumn }) => {
+    let newestFirst = false
     const renderList = (): void => {
       const list = document.createElement("ul")
-      for (const note of services.notes()) {
+      const ordered = newestFirst ? services.notes().toReversed() : services.notes()
+      for (const note of ordered) {
         const item = document.createElement("li")
         item.setAttribute("data-navigable", "")
         item.textContent = note.title
@@ -43,11 +46,13 @@ const listColumn = createColumnDefinition<Services>({
       content.replaceChildren(list)
     }
     renderList()
-    hideLoading()
-    // Refresh re-reads the notes in place: no teardown, no re-render, the render's closure still in scope.
-    return Promise.resolve(() => {
-      renderList()
-      return Promise.resolve()
+    return Promise.resolve({
+      refresh: renderList,
+      onMenuSelect: (action: string): void => {
+        if (action !== "reverse") return
+        newestFirst = !newestFirst
+        renderList()
+      },
     })
   },
 })
@@ -72,9 +77,8 @@ const detailColumn = createColumnDefinition<Services>({
 const customColumn = createColumnDefinition<Services>({
   type: "custom",
   label: "Custom",
-  onRender: (content, { hideLoading }) => {
+  onRender: (content) => {
     content.textContent = "Launched by the host's own shortcut (k)."
-    hideLoading()
     return Promise.resolve()
   },
 })

@@ -106,9 +106,10 @@ const makeDeck = async (overrides: DeckOverrides = {}) => {
         label: "Feed",
         onRender: (_el, context) => {
           context.onTeardown(() => teardowns.push("feed"))
-          return Promise.resolve(() => {
-            refreshes.push("feed")
-            return Promise.resolve()
+          return Promise.resolve({
+            refresh: (): void => {
+              refreshes.push("feed")
+            },
           })
         },
       }),

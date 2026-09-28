@@ -149,21 +149,15 @@ const createColumnManager = <S extends ColumnServices = ColumnServices>({
     onRefresh: () => refreshColumn(column.key),
     onMenuSelect: async (action: string): Promise<void> => {
       const view = resolveColumnView(column)
-      if (!view?.definition.onMenuSelect) return
-      await view.definition.onMenuSelect(view.shell.getContentElement(), buildOuterContext(column, view.shell), action)
+      if (view) await view.definition.onMenuSelect(view.shell.getContentElement(), action)
     },
     onListSelect: async (action: string, btn: HTMLButtonElement | null): Promise<void> => {
       const view = resolveColumnView(column)
-      if (!view?.definition.onListSelect) return
-      await view.definition.onListSelect(view.shell.getContentElement(), buildOuterContext(column, view.shell), {
-        action,
-        btn,
-      })
+      if (view) await view.definition.onListSelect(view.shell.getContentElement(), { action, btn })
     },
     onListsOpen: async (): Promise<void> => {
       const view = resolveColumnView(column)
-      if (!view?.definition.onListsOpen) return
-      await view.definition.onListsOpen(view.shell.getContentElement(), buildOuterContext(column, view.shell))
+      if (view) await view.definition.onListsOpen(view.shell.getContentElement())
     },
     onPinChange: (pinned: boolean): void => applyPinState(column.key, pinned),
   })

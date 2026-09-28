@@ -15,7 +15,7 @@ deno add jsr:@innis/column-deck
 A two-column task app: a singleton list column that launches per-task detail columns. The data layer is injected as `services`; the framework never sees it.
 
 ```ts
-import { createColumnDefinition, createColumnDeck } from "@innis/column-deck"
+import { type ColumnHandlers, createColumnDefinition, createColumnDeck } from "@innis/column-deck"
 
 interface TaskStore {
     readonly all: () => ReadonlyArray<{ id: string; title: string; notes: string }>
@@ -30,7 +30,7 @@ interface Services {
 const taskListColumn = createColumnDefinition<Services>({
     type: "task-list",
     label: "Tasks",
-    onRender: async (content, { services, launchColumn, onTeardown, hideLoading }): Promise<void> => {
+    onRender: async (content, { services, launchColumn, onTeardown }): Promise<ColumnHandlers> => {
         const renderList = (): void => {
             const list = document.createElement("ul")
             for (const task of services.taskStore.all()) {
@@ -43,7 +43,7 @@ const taskListColumn = createColumnDefinition<Services>({
         }
         onTeardown(services.taskStore.subscribe(renderList))
         renderList()
-        hideLoading()
+        return { refresh: renderList }
     },
 })
 
@@ -52,10 +52,9 @@ const taskDetailColumn = createColumnDefinition<Services>({
     label: "Task",
     singleton: false,
     getTitle: (entityId) => `Task ${entityId ?? ""}`,
-    onRender: async (content, { entityId, services, hideLoading }): Promise<void> => {
+    onRender: async (content, { entityId, services }): Promise<void> => {
         const task = entityId ? services.taskStore.get(entityId) : null
         content.textContent = task ? task.notes : "Task not found"
-        hideLoading()
     },
 })
 
@@ -73,7 +72,7 @@ const system = await createColumnDeck({
 await system.launchColumn("task-list")
 ```
 
-Nothing else is required: the deck supplies the column shell, a browser asset loader, sessionStorage persistence and a 768px mobile breakpoint. Override any of them on `createColumnDeck` (below). Keys that act inside a column — and your own application shortcuts — are yours to bind; see *Drag + keyboard*. A runnable version of this, with a declared template, a returned refresh, those host-side keys and the stylesheet for the deck's attributes, is `examples/minimal-host/` (`deno task example:minimal-host`, then http://localhost:8088).
+Nothing else is required: the deck supplies the column shell, a browser asset loader, sessionStorage persistence and a 768px mobile breakpoint. Override any of them on `createColumnDeck` (below). Keys that act inside a column — and your own application shortcuts — are yours to bind; see *Drag + keyboard*. A runnable version of this, with a declared template, returned refresh and menu handlers, those host-side keys and the stylesheet for the deck's attributes, is `examples/minimal-host/` (`deno task example:minimal-host`, then http://localhost:8088).
 
 ## Public surface
 
@@ -102,7 +101,7 @@ Returns a `ColumnDeck` with `launchColumn`, `closeColumn`, `refreshColumn`, `und
 
 Launching an unregistered column type rejects with `ColumnLifecycleError` before any state changes.
 
-The deck owns the mobile back-stack. Seed it with `initialMobileHistory`, observe changes via `onMobileHistoryChange`, and read it with `getMobileHistory()` — there is no shared mutable array crossing the API boundary. On mobile, navigating forward *suspends* the current column rather than closing it: its element is detached with its subscriptions and per-mount state intact and its scroll position remembered, and `goBack()` re-attaches it exactly as it was. Launching a column that is already suspended on the stack unwinds to it (closing everything above). At most eight suspended columns are kept alive; older ones are destroyed and re-rendered fresh if you return to them. `destroy()` destroys suspended columns too. Navigation notifies `onMobileHistoryChange` and moves focus as soon as the new shell is mounted — the column's own render continues behind it; the renderer yields one frame between mounting a shell and rendering its content so the chrome paints before a heavy render.
+The deck owns the mobile back-stack. Seed it with `initialMobileHistory`, observe changes via `onMobileHistoryChange`, and read it with `getMobileHistory()` — there is no shared mutable array crossing the API boundary. On mobile, navigating forward *suspends* the current column rather than closing it: its element is detached with its subscriptions and its render's handlers intact and its scroll position remembered, and `goBack()` re-attaches it exactly as it was. Launching a column that is already suspended on the stack unwinds to it (closing everything above). At most eight suspended columns are kept alive; older ones are destroyed and re-rendered fresh if you return to them. `destroy()` destroys suspended columns too. Navigation notifies `onMobileHistoryChange` and moves focus as soon as the new shell is mounted — the column's own render continues behind it; the renderer yields one frame between mounting a shell and rendering its content so the chrome paints before a heavy render.
 
 On desktop the layout is written to `persistence.save` on every state change and restored through `persistence.load` on construction. On mobile the deck neither saves nor restores it; the back-stack is the host's to seed through `initialMobileHistory`. One adapter is the single persistence channel.
 
@@ -125,13 +124,13 @@ The deck ships no CSS. It marks state with attributes for the host's stylesheet:
 ### Column definition — `column-base.ts`
 
 ```ts
-interface ColumnDefinitionParams<S, State> {
+interface ColumnDefinitionParams<S> {
     readonly type: string
     readonly label: string
     readonly css?: string | string[]
     readonly html?: string | string[]
     readonly js?: string | string[]
-    readonly template?: string                    // replaces the content before every onRender
+    readonly template?: string                    // mounted into the content before every onRender
     readonly hasClose?: boolean
     readonly hasRefresh?: boolean
     readonly hasLists?: boolean
@@ -139,33 +138,36 @@ interface ColumnDefinitionParams<S, State> {
     readonly singleton?: boolean
     readonly menuItems?: MenuItem[] | null        // MenuAction | MenuNotice | MenuSeparator
     readonly getTitle?: (entityId?) => string
-    readonly onRender: (content, context: ColumnContext<S, State>) => Promise<void | ColumnRefresh>
-    readonly onMenuSelect?: ...
-    readonly onListSelect?: ...
-    readonly onListsOpen?: ...
-    readonly onDestroy?: (state, content) => void
+    readonly onRender: (content, context: ColumnContext<S>) => Promise<void | ColumnHandlers>
 }
 
-createColumnDefinition<S, State>(params): ColumnDefinition<S>
+interface ColumnHandlers {
+    readonly refresh?: () => void | Promise<void>
+    readonly onMenuSelect?: (action: string) => void | Promise<void>
+    readonly onListSelect?: (selection: ListSelection) => void | Promise<void>
+    readonly onListsOpen?: () => void | Promise<void>
+}
+
+createColumnDefinition<S>(params): ColumnDefinition<S>
 ```
 
 The factory does three things:
 1. Normalises `css` / `html` / `js` to arrays and wraps them in a single `loadAssets(assetLoader)` call.
-2. Wires per-element state and teardown registries (a `WeakMap` of element → state, a parallel one of element → teardown callbacks).
-3. Translates `OuterColumnContext` (passed by the manager) into the richer `ColumnContext` your hooks see — adding `showLoading`, `hideLoading`, `onTeardown`, `trackHandle`, and the typed `state` bag.
+2. Wires per-element teardown and handler registries (a `WeakMap` of element → teardown callbacks, a parallel one of element → the handlers the last render returned).
+3. Translates `OuterColumnContext` (passed by the manager) into the richer `ColumnContext` your render sees — adding `showLoading`, `hideLoading`, `onTeardown`, `trackHandle` and `signal`.
 
-Anything you put in `context.state` is the same object you receive in `onDestroy`. Anything you `context.onTeardown(fn)` runs on close — and before every re-render, so a refresh never stacks a second subscription on top of the first.
+`template`, when given, names a registered `<template>`; its clone replaces the content element's children before every `onRender`, so a column never clears and mounts its own markup. A column without one starts over the deck's loading indicator instead. A templated column that then waits on something calls `showLoading` itself, and shows what it can while it waits.
 
-`template`, when given, names a registered `<template>`; its clone replaces the content element's children before every `onRender`, so a column does not clear and mount its own markup. The mount would remove a loading indicator at once, so the deck shows one only for columns without a template; a templated column that loads asynchronously calls `showLoading` itself.
+Anything you `context.onTeardown(fn)` runs on close — and before every re-render, so a refresh never stacks a second subscription on top of the first.
 
-`onRender` may resolve with a `ColumnRefresh`, a function that refreshes synchronously or returns a promise. The refresh button then calls it, against the live DOM with the render's subscriptions intact and its closure in scope. A column whose `onRender` resolves with nothing is torn down and rendered again on refresh. A re-render forgets the previous render's refresh function.
+`onRender` may resolve with `ColumnHandlers`: what the refresh button, the header menu and the list selector call. Each is a closure over the render, so it acts on the live DOM with the render's subscriptions intact, and whatever a render needs to remember lives in its own local variables. Each may act synchronously or return a promise. Without a `refresh`, the refresh button tears the column down and renders it again. A re-render or a close forgets the previous render's handlers, and a render that a newer render overtook never installs its own.
 
-`onListsOpen` fires when the user opens the column's list selector; populate it with `context.updateListItems`. `onListSelect` fires when an entry is chosen.
+`onListsOpen` is called when the user opens the column's list selector; populate it with `context.updateListItems`. `onListSelect` is called when an entry is chosen.
 
 ### Column context — `column-base.ts`
 
 ```ts
-interface ColumnContext<S, State> {
+interface ColumnContext<S> {
     readonly entityId: string | null
     readonly launchColumn: (type, entityId?) => Promise<string>
     readonly updateTitle: (title: string) => void
@@ -178,12 +180,12 @@ interface ColumnContext<S, State> {
     readonly hideLoading: () => void
     readonly onTeardown: (fn: () => void) => void
     readonly trackHandle: <T extends { abort(): void }>(handle: T) => T
-    readonly state: State
+    readonly signal: AbortSignal
     readonly services: S
 }
 ```
 
-Columns *only* see their context. They never see the registry, manager, or other columns. `services` is the application-supplied dependency bundle, typed end-to-end: `createColumnDefinition<S>` fixes the `S` your hooks receive, and `createColumnDeck` only accepts definitions compatible with the `services` value it was given. `trackHandle` registers an abortable handle's `abort` as a teardown and returns the handle.
+Columns *only* see their context. They never see the registry, manager, or other columns. `services` is the application-supplied dependency bundle, typed end-to-end: `createColumnDefinition<S>` fixes the `S` your render receives, and `createColumnDeck` only accepts definitions compatible with the `services` value it was given. `trackHandle` registers an abortable handle's `abort` as a teardown and returns the handle. `signal` aborts when the render's teardowns run, so `target.addEventListener(type, handler, { signal })` needs no teardown of its own.
 
 ### State — `column-state.ts`
 
@@ -224,26 +226,28 @@ launchColumn(type, entityId)
     │
     ├─ manager creates Column { type, entityId, key, ... }
     ├─ renderer clones the shell template and mounts it
-    ├─ definition.template, when declared, replaces the content
+    ├─ definition.template is mounted into the content (or the loading indicator, without one)
     │
-    ├─ definition.onRender(content, context)     -- your code runs here
+    ├─ definition.onRender(content, context)     -- your code runs here and returns its handlers
     │
     └─ ... user interacts ...
             │
-            ├─ refresh button -> the ColumnRefresh onRender returned
-            │                    (or teardowns + full re-render when it returned none)
-            ├─ menu -> definition.onMenuSelect(content, context, action)
-            ├─ lists open -> definition.onListsOpen(content, context)
-            └─ close -> run teardowns + definition.onDestroy(state, content)
+            ├─ refresh button -> handlers.refresh()
+            │                    (or teardowns + full re-render when the render returned none)
+            ├─ menu -> handlers.onMenuSelect(action)
+            ├─ lists open -> handlers.onListsOpen()
+            ├─ list entry -> handlers.onListSelect(selection)
+            └─ close -> run teardowns, forget the handlers
 ```
 
 `singleton: true` (the default) means launching the same `type` twice focuses the existing column instead of creating a second instance; launching it with a different `entityId` re-renders it in place (running the previous render's teardowns first).
 
 ## Anti-patterns
 
-- **Holding a reference to a column's content element outside its lifecycle.** It's removed from the DOM on close; references become stale. Put long-lived refs into `context.state` so they're cleaned up by `onDestroy`.
-- **Subscribing to data sources / DOM events without `context.onTeardown`.** Anything that survives `onDestroy` is a leak. Always register a teardown for every subscription.
+- **Holding a reference to a column's content element outside its lifecycle.** It's removed from the DOM on close; references become stale. Keep references in the render's own local variables, which its handlers close over and a close releases.
+- **Subscribing to data sources / DOM events without `context.onTeardown`.** Anything that survives a close is a leak. Always register a teardown for every subscription.
 - **Talking to other columns directly.** Use `context.launchColumn(type, entityId)` — the registry resolves and the manager mounts. Reaching into another column's DOM bypasses its lifecycle.
-- **Keeping a refresh function on `context.state` for later.** Return it from `onRender`; the refresh button calls it, and a re-render replaces it.
+- **Keeping a render's functions or data outside the render for a header control to find later.** Return the handlers from `onRender`; they close over what they need, and a re-render replaces them.
 - **Clearing the content and mounting your own markup at the top of `onRender`.** Declare `template` and the deck mounts it for you.
+- **Waiting on something before mounting.** Mount the template, show what you can, and fill in the rest as it arrives.
 - **Loading assets manually inside `onRender`.** Pass them in the definition's `css`/`html`/`js` keys; the renderer calls `loadAssets` for you, and the asset loader (the browser default or your own) dedups per path.
