@@ -86,3 +86,70 @@ Deno.test("createColumnDefinition - a re-render forgets the refresh the previous
     removeDocumentMock()
   }
 })
+
+Deno.test("createColumnDefinition - a render overtaken by a newer render does not install its refresh", async () => {
+  installDocumentMock()
+  try {
+    const calls: Array<string> = []
+    const { promise: firstGate, resolve: openFirst } = Promise.withResolvers<void>()
+    let renders = 0
+    const def = createColumnDefinition({
+      type: "test",
+      label: "Test",
+      onRender: async () => {
+        renders++
+        const mine = renders
+        calls.push(`render ${mine}`)
+        if (mine === 1) {
+          await firstGate
+          return () => {
+            calls.push("refresh from render 1")
+            return Promise.resolve()
+          }
+        }
+        return () => {
+          calls.push("refresh from render 2")
+          return Promise.resolve()
+        }
+      },
+    })
+
+    const el = createMockElement()
+    const first = def.render(el, createMockOuterContext())
+    await def.render(el, createMockOuterContext())
+    openFirst()
+    await first
+    await def.refresh(el, createMockOuterContext())
+
+    assertEquals(calls, ["render 1", "render 2", "refresh from render 2"])
+  } finally {
+    removeDocumentMock()
+  }
+})
+
+Deno.test("createColumnDefinition - a destroyed column keeps no refresh", async () => {
+  installDocumentMock()
+  try {
+    const calls: Array<string> = []
+    const def = createColumnDefinition({
+      type: "test",
+      label: "Test",
+      onRender: () => {
+        calls.push("render")
+        return Promise.resolve(() => {
+          calls.push("stale refresh")
+          return Promise.resolve()
+        })
+      },
+    })
+
+    const el = createMockElement()
+    await def.render(el, createMockOuterContext())
+    def.onDestroy(el)
+    await def.refresh(el, createMockOuterContext())
+
+    assertEquals(calls, ["render", "render"])
+  } finally {
+    removeDocumentMock()
+  }
+})

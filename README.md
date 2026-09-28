@@ -73,7 +73,7 @@ const system = await createColumnDeck({
 await system.launchColumn("task-list")
 ```
 
-Nothing else is required: the deck supplies the column shell, a browser asset loader, sessionStorage persistence and a 768px mobile breakpoint. Override any of them on `createColumnDeck` (below). Keys that act inside a column — and your own application shortcuts — are yours to bind; see *Drag + keyboard*. A runnable version of exactly this, with those host-side keys and the stylesheet for the deck's attributes, is `examples/minimal-host/` (`deno task example:minimal-host`, then http://localhost:8088).
+Nothing else is required: the deck supplies the column shell, a browser asset loader, sessionStorage persistence and a 768px mobile breakpoint. Override any of them on `createColumnDeck` (below). Keys that act inside a column — and your own application shortcuts — are yours to bind; see *Drag + keyboard*. A runnable version of this, with a declared template, a returned refresh, those host-side keys and the stylesheet for the deck's attributes, is `examples/minimal-host/` (`deno task example:minimal-host`, then http://localhost:8088).
 
 ## Public surface
 
@@ -104,7 +104,7 @@ Launching an unregistered column type rejects with `ColumnLifecycleError` before
 
 The deck owns the mobile back-stack. Seed it with `initialMobileHistory`, observe changes via `onMobileHistoryChange`, and read it with `getMobileHistory()` — there is no shared mutable array crossing the API boundary. On mobile, navigating forward *suspends* the current column rather than closing it: its element is detached with its subscriptions and per-mount state intact and its scroll position remembered, and `goBack()` re-attaches it exactly as it was. Launching a column that is already suspended on the stack unwinds to it (closing everything above). At most eight suspended columns are kept alive; older ones are destroyed and re-rendered fresh if you return to them. `destroy()` destroys suspended columns too. Navigation notifies `onMobileHistoryChange` and moves focus as soon as the new shell is mounted — the column's own render continues behind it; the renderer yields one frame between mounting a shell and rendering its content so the chrome paints before a heavy render.
 
-The layout is written to `persistence.save` on every state change (desktop only) and restored through `persistence.load` on construction. One adapter is the single persistence channel.
+On desktop the layout is written to `persistence.save` on every state change and restored through `persistence.load` on construction. On mobile the deck neither saves nor restores it; the back-stack is the host's to seed through `initialMobileHistory`. One adapter is the single persistence channel.
 
 `createColumnDeck<S>` is generic over the services type: the `services` value and every registered `ColumnDefinition<S>` must agree on `S`, checked at the call site. A definition declaring a narrower services requirement is assignable to a system holding a wider bag.
 
@@ -173,6 +173,7 @@ interface ColumnContext<S, State> {
     readonly updateListItems: (items: MenuItem[]) => void
     readonly updateHeaderStatus: (status: string | null) => void
     readonly cloneTemplate: (id) => DocumentFragment
+    readonly close: () => void
     readonly showLoading: () => void
     readonly hideLoading: () => void
     readonly onTeardown: (fn: () => void) => void
@@ -223,6 +224,7 @@ launchColumn(type, entityId)
     │
     ├─ manager creates Column { type, entityId, key, ... }
     ├─ renderer clones the shell template and mounts it
+    ├─ definition.template, when declared, replaces the content
     │
     ├─ definition.onRender(content, context)     -- your code runs here
     │
@@ -242,4 +244,6 @@ launchColumn(type, entityId)
 - **Holding a reference to a column's content element outside its lifecycle.** It's removed from the DOM on close; references become stale. Put long-lived refs into `context.state` so they're cleaned up by `onDestroy`.
 - **Subscribing to data sources / DOM events without `context.onTeardown`.** Anything that survives `onDestroy` is a leak. Always register a teardown for every subscription.
 - **Talking to other columns directly.** Use `context.launchColumn(type, entityId)` — the registry resolves and the manager mounts. Reaching into another column's DOM bypasses its lifecycle.
+- **Keeping a refresh function on `context.state` for later.** Return it from `onRender`; the refresh button calls it, and a re-render replaces it.
+- **Clearing the content and mounting your own markup at the top of `onRender`.** Declare `template` and the deck mounts it for you.
 - **Loading assets manually inside `onRender`.** Pass them in the definition's `css`/`html`/`js` keys; the renderer calls `loadAssets` for you, and the asset loader (the browser default or your own) dedups per path.

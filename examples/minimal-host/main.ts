@@ -2,7 +2,8 @@
  * The smallest useful host for @innis/column-deck: three column definitions, the deck with every
  * default in place, and the two things the deck deliberately leaves to the host — an application
  * shortcut (`k` launches a column) and in-column keys (ArrowUp/ArrowDown walk the focused column's
- * items, Enter activates one).
+ * items, Enter activates one). The list column refreshes in place through the function its render
+ * returns; the note column mounts a declared template instead of building its own markup.
  *
  * Build and serve with `deno task example:minimal-host`, then open http://localhost:8088.
  */
@@ -15,7 +16,7 @@ interface Note {
 }
 
 interface Services {
-  readonly notes: ReadonlyArray<Note>
+  readonly notes: () => ReadonlyArray<Note>
 }
 
 const NOTES: ReadonlyArray<Note> = Array.from({ length: 12 }, (_, i) => ({
@@ -24,21 +25,30 @@ const NOTES: ReadonlyArray<Note> = Array.from({ length: 12 }, (_, i) => ({
   body: `Body of note ${i + 1}.`,
 }))
 
+const notes = (): ReadonlyArray<Note> => NOTES
+
 const listColumn = createColumnDefinition<Services>({
   type: "list",
   label: "Notes",
   onRender: (content, { services, launchColumn, hideLoading }) => {
-    const list = document.createElement("ul")
-    for (const note of services.notes) {
-      const item = document.createElement("li")
-      item.setAttribute("data-navigable", "")
-      item.textContent = note.title
-      item.addEventListener("click", () => launchColumn("detail", note.id))
-      list.appendChild(item)
+    const renderList = (): void => {
+      const list = document.createElement("ul")
+      for (const note of services.notes()) {
+        const item = document.createElement("li")
+        item.setAttribute("data-navigable", "")
+        item.textContent = note.title
+        item.addEventListener("click", () => launchColumn("detail", note.id))
+        list.appendChild(item)
+      }
+      content.replaceChildren(list)
     }
-    content.replaceChildren(list)
+    renderList()
     hideLoading()
-    return Promise.resolve()
+    // Refresh re-reads the notes in place: no teardown, no re-render, the render's closure still in scope.
+    return Promise.resolve(() => {
+      renderList()
+      return Promise.resolve()
+    })
   },
 })
 
@@ -46,11 +56,15 @@ const detailColumn = createColumnDefinition<Services>({
   type: "detail",
   label: "Note",
   singleton: false,
+  html: "./templates.html",
+  template: "detail-template",
   getTitle: (entityId) => `Note ${entityId ?? ""}`,
-  onRender: (content, { entityId, services, hideLoading }) => {
-    const note = services.notes.find((n) => n.id === entityId)
-    content.textContent = note ? note.body : "Note not found"
-    hideLoading()
+  onRender: (content, { entityId, services }) => {
+    const note = services.notes().find((n) => n.id === entityId)
+    const title = content.querySelector("[data-note-title]")
+    const body = content.querySelector("[data-note-body]")
+    if (title) title.textContent = note ? note.title : "Note not found"
+    if (body) body.textContent = note ? note.body : ""
     return Promise.resolve()
   },
 })
@@ -71,7 +85,7 @@ if (!(mountElement instanceof HTMLElement)) throw new Error("Missing <main>")
 const deck: ColumnDeck = await createColumnDeck<Services>({
   mountElement,
   columnDefinitions: [listColumn, detailColumn, customColumn],
-  services: { notes: NOTES },
+  services: { notes },
 })
 
 if (deck.getColumnCount() === 0) await deck.launchColumn("list")

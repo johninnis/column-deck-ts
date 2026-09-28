@@ -179,6 +179,7 @@ const createColumnDefinition = <
   const columnState = new WeakMap<HTMLElement, State>()
   const columnTeardowns = new WeakMap<HTMLElement, Array<() => void>>()
   const columnRefreshes = new WeakMap<HTMLElement, ColumnRefresh>()
+  const renderGenerations = new WeakMap<HTMLElement, number>()
 
   const getColumnState = (element: HTMLElement): State => {
     let state = columnState.get(element)
@@ -252,10 +253,15 @@ const createColumnDefinition = <
   const render = async (contentElement: HTMLElement, context: OuterColumnContext<S>): Promise<void> => {
     runTeardowns(contentElement)
     columnRefreshes.delete(contentElement)
+    const generation = (renderGenerations.get(contentElement) ?? 0) + 1
+    renderGenerations.set(contentElement, generation)
     if (template) contentElement.replaceChildren(context.cloneTemplate(template))
     else showLoading(contentElement)
     const ownRefresh = await onRender(contentElement, buildContext(contentElement, context))
-    if (ownRefresh) columnRefreshes.set(contentElement, ownRefresh)
+    // A render that a newer render or a destroy overtook while it ran must not install its refresh.
+    if (ownRefresh && renderGenerations.get(contentElement) === generation) {
+      columnRefreshes.set(contentElement, ownRefresh)
+    }
   }
 
   const refresh = async (contentElement: HTMLElement, context: OuterColumnContext<S>): Promise<void> => {
@@ -291,6 +297,8 @@ const createColumnDefinition = <
       onDestroy(getColumnState(contentElement), contentElement)
     }
     columnState.delete(contentElement)
+    columnRefreshes.delete(contentElement)
+    renderGenerations.delete(contentElement)
   }
 
   return Object.freeze({
