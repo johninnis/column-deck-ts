@@ -31,9 +31,15 @@ interface Harness {
   readonly container: HTMLElement
   readonly columns: ReadonlyArray<HTMLElement>
   readonly reorders: ReadonlyArray<{ from: number; to: number }>
-  readonly fire: (type: string, event: Partial<DragEvent>) => void
+  readonly fire: (type: string, event: FakeDragEvent) => void
   readonly listenerCount: () => number
   readonly detach: () => void
+}
+
+interface FakeDragEvent {
+  readonly target?: EventTarget | undefined
+  readonly dataTransfer?: DataTransfer | undefined
+  readonly clientX?: number | undefined
 }
 
 const makeHarness = (options: { readonly isMobile?: boolean; readonly pinnedFirst?: boolean } = {}): Harness => {
@@ -78,7 +84,7 @@ const makeHarness = (options: { readonly isMobile?: boolean; readonly pinnedFirs
   })
   handler.attach()
 
-  const fire = (type: string, event: Partial<DragEvent>): void => {
+  const fire = (type: string, event: FakeDragEvent): void => {
     const listener = listeners.get(type)
     if (!listener) throw new Error(`no listener for ${type}`)
     // deno-lint-ignore innis/no-type-assertions

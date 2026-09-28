@@ -120,7 +120,7 @@ Every column is mounted into a clone of the shell. The default shell is text-lab
 
 ### Styling contract
 
-The deck ships no CSS. It marks state with attributes for the host's stylesheet: `[data-column]` and `[data-column-key]` on every shell root, `[data-pinned]`, `[data-dragging]`, `[data-visible]` on an open `[data-menu-list]`/`[data-lists-list]`, `[data-separator]`, `[data-variant]` and `[data-selected]` on menu entries, `[data-loading]` on the loading indicator, `[data-status-bar]` on the title, and the `hidden` attribute (the close button of a pinned column, for one) — so a host stylesheet must let `[hidden]` win over its own `display` rules. Column focus lands on the header `h2`, so `header:focus-within` styles the focused column.
+The deck ships no CSS. It marks state with attributes for the host's stylesheet: `[data-column]` and `[data-column-key]` on every shell root, `[data-pinned]`, `[data-dragging]`, `[data-visible]` on an open `[data-menu-list]`/`[data-lists-list]`, `[data-separator]`, `[data-variant]` and `[data-selected]` on menu entries, `[data-loading]` on the loading indicator, `[data-status-bar]` on the title, and the `hidden` attribute (the close button of a pinned column, for one) — so a host stylesheet must let `[hidden]` win over its own `display` rules. Column focus lands on the header `h2`, so `header:focus-within` styles the focused column. The deck's own scrolling (bringing a column into view, double-clicking a header, `Home`/`End`) is smooth, and jumps instead when the reader prefers reduced motion.
 
 ### Column definition — `column-base.ts`
 

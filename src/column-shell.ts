@@ -1,5 +1,6 @@
 import type { MenuAction, MenuItem } from "./column-base.ts"
 import { ColumnLifecycleError } from "./errors.ts"
+import { scrollBehaviour } from "./motion.ts"
 import type { ShellTemplate } from "./shell-template.ts"
 
 const query = <T extends Element>(root: ParentNode, selector: string, type: { new (): T }): T => {
@@ -50,6 +51,7 @@ const populateDropdown = (
     }
     li.setAttribute("role", "none")
     const btn = document.createElement("button")
+    btn.setAttribute("type", "button")
     btn.setAttribute("role", "menuitem")
     btn.textContent = item.label
     if ("disabled" in item) {
@@ -235,7 +237,7 @@ const createColumnShell = ({
   }, { passive: false })
 
   header.addEventListener("dblclick", () => {
-    resolveScrollRegion(content).scrollTo({ top: 0, behavior: "smooth" })
+    resolveScrollRegion(content).scrollTo({ top: 0, behavior: scrollBehaviour() })
   })
 
   shell.addEventListener("click", onFocus)

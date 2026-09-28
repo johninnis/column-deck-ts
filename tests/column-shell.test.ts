@@ -367,3 +367,13 @@ Deno.test("createColumnShell - clicking a list item button fires onListSelect wi
   click(btn)
   assertEquals(calls, ["l"])
 })
+
+Deno.test("createColumnShell - menu entries are plain buttons that never submit a form", () => {
+  const shell = createColumnShell({
+    shellTemplate: cloneTemplate,
+    title: "Feed",
+    menuItems: [{ label: "Copy", action: "copy" }],
+  })
+  const entry = shell.element.querySelector("[data-menu-list] button")
+  assertEquals(entry?.getAttribute("type"), "button")
+})

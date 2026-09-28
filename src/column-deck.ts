@@ -15,16 +15,16 @@ const isNarrowViewport = (): boolean => !matchMedia("(min-width: 768px)").matche
 /** What the host hands {@linkcode createColumnDeck}: the mount point, column definitions and services, plus optional overrides for the asset loader, shell template, persistence and mobile breakpoint (each defaults to the deck's browser implementation) and the lifecycle callbacks. */
 interface ColumnDeckDeps<S extends ColumnServices = ColumnServices> {
   readonly mountElement: HTMLElement
-  readonly assetLoader?: AssetLoader
-  readonly shellTemplate?: ShellTemplate
-  readonly persistence?: PersistenceAdapter
-  readonly isMobile?: () => boolean
-  readonly initialMobileHistory?: ReadonlyArray<ColumnRef>
-  readonly assetPaths?: ColumnAssetPaths
+  readonly assetLoader?: AssetLoader | undefined
+  readonly shellTemplate?: ShellTemplate | undefined
+  readonly persistence?: PersistenceAdapter | undefined
+  readonly isMobile?: (() => boolean) | undefined
+  readonly initialMobileHistory?: ReadonlyArray<ColumnRef> | undefined
+  readonly assetPaths?: ColumnAssetPaths | undefined
   readonly onPinnedColumnsChange?: ((columns: ReadonlyArray<ColumnRef>) => void) | null
-  readonly onMobileHistoryChange?: () => void
-  readonly onEscape?: () => boolean
-  readonly columnDefinitions?: ReadonlyArray<ColumnDefinition<S>>
+  readonly onMobileHistoryChange?: (() => void) | undefined
+  readonly onEscape?: (() => boolean) | undefined
+  readonly columnDefinitions?: ReadonlyArray<ColumnDefinition<S>> | undefined
   readonly services: S
 }
 

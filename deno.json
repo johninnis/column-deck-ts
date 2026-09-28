@@ -14,6 +14,7 @@
   "compilerOptions": {
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
     "lib": [
       "deno.ns",
       "dom",

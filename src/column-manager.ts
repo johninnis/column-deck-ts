@@ -42,12 +42,12 @@ interface ColumnManagerDeps<S extends ColumnServices = ColumnServices> {
   readonly persistence: PersistenceAdapter
   readonly assetLoader: AssetLoader
   readonly shellTemplate: ShellTemplate
-  readonly assetPaths?: ColumnAssetPaths
+  readonly assetPaths?: ColumnAssetPaths | undefined
   readonly columnRegistry: ColumnRegistry<S>
   readonly isMobile: () => boolean
-  readonly initialMobileHistory?: ReadonlyArray<ColumnRef>
+  readonly initialMobileHistory?: ReadonlyArray<ColumnRef> | undefined
   readonly onPinnedColumnsChange?: ((columns: ReadonlyArray<ColumnRef>) => void) | null
-  readonly onMobileHistoryChange?: () => void
+  readonly onMobileHistoryChange?: (() => void) | undefined
   readonly services: S
 }
 

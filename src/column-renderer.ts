@@ -6,6 +6,7 @@ import { createColumnShell } from "./column-shell.ts"
 import type { ShellTemplate } from "./shell-template.ts"
 import { applyColumnDataset } from "./column-dom.ts"
 import { ColumnLifecycleError } from "./errors.ts"
+import { scrollBehaviour } from "./motion.ts"
 
 type LaunchColumnFn = (type: string, entityId?: string | null, spawnedFrom?: ColumnKey | null) => Promise<string>
 
@@ -51,7 +52,7 @@ const createColumnRenderer = <S extends ColumnServices = ColumnServices>({
   const scrollToElement = (element: HTMLElement): void => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        element.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" })
+        element.scrollIntoView({ behavior: scrollBehaviour(), inline: "nearest", block: "nearest" })
       })
     })
   }

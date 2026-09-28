@@ -14,7 +14,7 @@ interface MobileNavigatorDeps {
   readonly destroyColumns: (columns: ReadonlyArray<Column>) => void
   readonly closeAllColumns: () => void
   readonly focusColumn: (key: ColumnKey) => void
-  readonly onMobileHistoryChange?: () => void
+  readonly onMobileHistoryChange?: (() => void) | undefined
 }
 
 interface MobileNavigator {

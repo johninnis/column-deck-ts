@@ -1,6 +1,7 @@
 import type { ColumnKey } from "./column-state.ts"
 import { getColumnKeyFromElement } from "./column-dom.ts"
 import { resolveScrollRegion } from "./column-shell.ts"
+import { scrollBehaviour } from "./motion.ts"
 
 interface KeyboardHandler {
   readonly attach: () => void
@@ -15,7 +16,7 @@ interface KeyboardHandlerDeps {
   readonly onMoveColumn: (key: ColumnKey, direction: number) => boolean
   readonly onClose: (key: ColumnKey) => void
   readonly onRefresh: (key: ColumnKey) => void
-  readonly onEscape?: () => boolean
+  readonly onEscape?: (() => boolean) | undefined
 }
 
 const createKeyboardHandler = (deps: KeyboardHandlerDeps): KeyboardHandler => {
@@ -86,7 +87,7 @@ const createKeyboardHandler = (deps: KeyboardHandlerDeps): KeyboardHandler => {
       if (!(content instanceof HTMLElement)) return
       event.preventDefault()
       const scroller = resolveScrollRegion(content)
-      scroller.scrollTo({ top: event.key === "Home" ? 0 : scroller.scrollHeight, behavior: "smooth" })
+      scroller.scrollTo({ top: event.key === "Home" ? 0 : scroller.scrollHeight, behavior: scrollBehaviour() })
       return
     }
 
