@@ -158,7 +158,7 @@ Anything you put in `context.state` is the same object you receive in `onDestroy
 
 `template`, when given, names a registered `<template>`; its clone replaces the content element's children before every `onRender`, so a column does not clear and mount its own markup. The mount would remove a loading indicator at once, so the deck shows one only for columns without a template; a templated column that loads asynchronously calls `showLoading` itself.
 
-`onRender` may resolve with a `ColumnRefresh`. The refresh button then calls it, against the live DOM with the render's subscriptions intact and its closure in scope. A column whose `onRender` resolves with nothing is torn down and rendered again on refresh. A re-render forgets the previous render's refresh function.
+`onRender` may resolve with a `ColumnRefresh`, a function that refreshes synchronously or returns a promise. The refresh button then calls it, against the live DOM with the render's subscriptions intact and its closure in scope. A column whose `onRender` resolves with nothing is torn down and rendered again on refresh. A re-render forgets the previous render's refresh function.
 
 `onListsOpen` fires when the user opens the column's list selector; populate it with `context.updateListItems`. `onListSelect` fires when an entry is chosen.
 

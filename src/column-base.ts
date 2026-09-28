@@ -94,7 +94,7 @@ interface ColumnDefinition<S extends ColumnServices = ColumnServices> {
 }
 
 /** A column's own refresh, returned from `onRender`: the refresh button calls it instead of re-rendering. */
-type ColumnRefresh = () => Promise<void>
+type ColumnRefresh = () => void | Promise<void>
 
 /** Author-facing options for {@linkcode createColumnDefinition}: assets, header behaviour, and lifecycle callbacks. */
 interface ColumnDefinitionParams<

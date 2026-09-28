@@ -57,6 +57,29 @@ Deno.test("createColumnDefinition - refresh calls the refresh onRender returned 
   }
 })
 
+Deno.test("createColumnDefinition - refresh calls a synchronous refresh onRender returned", async () => {
+  installDocumentMock()
+  try {
+    const calls: Array<string> = []
+    const def = createColumnDefinition({
+      type: "test",
+      label: "Test",
+      onRender: () =>
+        Promise.resolve((): void => {
+          calls.push("own refresh")
+        }),
+    })
+
+    const el = createMockElement()
+    await def.render(el, createMockOuterContext())
+    await def.refresh(el, createMockOuterContext())
+
+    assertEquals(calls, ["own refresh"])
+  } finally {
+    removeDocumentMock()
+  }
+})
+
 Deno.test("createColumnDefinition - a re-render forgets the refresh the previous render returned", async () => {
   installDocumentMock()
   try {
