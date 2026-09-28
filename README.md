@@ -131,6 +131,7 @@ interface ColumnDefinitionParams<S, State> {
     readonly css?: string | string[]
     readonly html?: string | string[]
     readonly js?: string | string[]
+    readonly template?: string                    // replaces the content before every onRender
     readonly hasClose?: boolean
     readonly hasRefresh?: boolean
     readonly hasLists?: boolean
@@ -138,8 +139,7 @@ interface ColumnDefinitionParams<S, State> {
     readonly singleton?: boolean
     readonly menuItems?: MenuItem[] | null        // MenuAction | MenuNotice | MenuSeparator
     readonly getTitle?: (entityId?) => string
-    readonly onRender: (content, context: ColumnContext<S, State>) => Promise<void>
-    readonly onRefresh?: (content, context) => Promise<void>
+    readonly onRender: (content, context: ColumnContext<S, State>) => Promise<void | ColumnRefresh>
     readonly onMenuSelect?: ...
     readonly onListSelect?: ...
     readonly onListsOpen?: ...
@@ -156,7 +156,9 @@ The factory does three things:
 
 Anything you put in `context.state` is the same object you receive in `onDestroy`. Anything you `context.onTeardown(fn)` runs on close — and before every re-render, so a refresh never stacks a second subscription on top of the first.
 
-`onRefresh`, when provided, replaces the default full re-render: it runs against the live DOM with the existing subscriptions intact. Without it, refresh tears down and re-renders from scratch.
+`template`, when given, names a registered `<template>`; its clone replaces the content element's children before every `onRender`, so a column does not clear and mount its own markup. The mount would remove a loading indicator at once, so the deck shows one only for columns without a template; a templated column that loads asynchronously calls `showLoading` itself.
+
+`onRender` may resolve with a `ColumnRefresh`. The refresh button then calls it, against the live DOM with the render's subscriptions intact and its closure in scope. A column whose `onRender` resolves with nothing is torn down and rendered again on refresh. A re-render forgets the previous render's refresh function.
 
 `onListsOpen` fires when the user opens the column's list selector; populate it with `context.updateListItems`. `onListSelect` fires when an entry is chosen.
 
@@ -226,8 +228,8 @@ launchColumn(type, entityId)
     │
     └─ ... user interacts ...
             │
-            ├─ refresh button -> definition.onRefresh(content, context)
-            │                    (or teardowns + full re-render when no onRefresh is given)
+            ├─ refresh button -> the ColumnRefresh onRender returned
+            │                    (or teardowns + full re-render when it returned none)
             ├─ menu -> definition.onMenuSelect(content, context, action)
             ├─ lists open -> definition.onListsOpen(content, context)
             └─ close -> run teardowns + definition.onDestroy(state, content)

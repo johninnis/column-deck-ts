@@ -1,77 +1,12 @@
 import { assert, assertEquals } from "@std/assert"
 import { createColumnDefinition } from "../src/column-base.ts"
-import type { AssetLoader, OuterColumnContext } from "../src/column-base.ts"
-
-const createMockElement = (): HTMLElement => {
-  const children: Array<unknown> = []
-  // deno-lint-ignore innis/no-type-assertions
-  return {
-    querySelector: () => null,
-    appendChild: (child: unknown) => {
-      children.push(child)
-    },
-    setAttribute: () => {},
-    remove: () => {},
-    children,
-  } as unknown as HTMLElement
-}
-
-const createMockAssetLoader = (): { loader: AssetLoader; calls: ReadonlyArray<{ method: string; path: string }> } => {
-  const calls: Array<{ method: string; path: string }> = []
-  return {
-    loader: {
-      loadCss: (path: string) => {
-        calls.push({ method: "loadCss", path })
-        return Promise.resolve()
-      },
-      loadHtml: (path: string) => {
-        calls.push({ method: "loadHtml", path })
-        return Promise.resolve()
-      },
-      loadJs: (path: string) => {
-        calls.push({ method: "loadJs", path })
-        return Promise.resolve()
-      },
-      // deno-lint-ignore innis/no-type-assertions
-      cloneTemplate: (id: string) => ({ id } as unknown as DocumentFragment),
-    },
-    calls,
-  }
-}
-
-const createMockOuterContext = (): OuterColumnContext => ({
-  entityId: null,
-  launchColumn: () => Promise.resolve("col-1"),
-  updateTitle: () => {},
-  updateMenuItems: () => {},
-  updateListItems: () => {},
-  updateHeaderStatus: () => {},
-  close: () => {},
-  // deno-lint-ignore innis/no-type-assertions
-  cloneTemplate: (id: string) => ({ id } as unknown as DocumentFragment),
-  services: {},
-})
-
-const installDocumentMock = (): void => {
-  Reflect.set(globalThis, "document", {
-    createElement: (tag: string) => ({
-      tagName: tag,
-      setAttribute: () => {},
-      appendChild: () => {},
-      querySelector: () => null,
-      remove: () => {},
-      textContent: "",
-      get innerHTML(): string {
-        return ""
-      },
-    }),
-    querySelector: () => null,
-  })
-}
-
-const removeDocumentMock = (): void => {
-  Reflect.deleteProperty(globalThis, "document")
-}
+import {
+  createMockAssetLoader,
+  createMockElement,
+  createMockOuterContext,
+  installDocumentMock,
+  removeDocumentMock,
+} from "./support/column-base-mocks.ts"
 
 Deno.test("createColumnDefinition - returns correct type and label", () => {
   const def = createColumnDefinition({
@@ -273,36 +208,6 @@ Deno.test("createColumnDefinition - onDestroy cleans up column state", async () 
   }
 })
 
-Deno.test("createColumnDefinition - refresh runs onRefresh instead of a full re-render when provided", async () => {
-  installDocumentMock()
-  try {
-    const calls: string[] = []
-    const { loader } = createMockAssetLoader()
-    const def = createColumnDefinition({
-      type: "test",
-      label: "Test",
-      onRender: () => {
-        calls.push("render")
-        return Promise.resolve()
-      },
-      onRefresh: () => {
-        calls.push("refresh")
-        return Promise.resolve()
-      },
-    })
-
-    await def.loadAssets(loader)
-    const el = createMockElement()
-    await def.render(el, createMockOuterContext())
-    calls.length = 0
-    await def.refresh(el, createMockOuterContext())
-
-    assertEquals(calls, ["refresh"])
-  } finally {
-    removeDocumentMock()
-  }
-})
-
 Deno.test("createColumnDefinition - re-render runs the previous render's teardowns first", async () => {
   installDocumentMock()
   try {
@@ -332,7 +237,7 @@ Deno.test("createColumnDefinition - re-render runs the previous render's teardow
   }
 })
 
-Deno.test("createColumnDefinition - refresh only re-renders when no onRefresh is given", async () => {
+Deno.test("createColumnDefinition - refresh re-renders when onRender returned no refresh", async () => {
   installDocumentMock()
   try {
     let renderCount = 0

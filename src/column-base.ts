@@ -93,6 +93,9 @@ interface ColumnDefinition<S extends ColumnServices = ColumnServices> {
   readonly onDestroy: (contentElement: HTMLElement) => void
 }
 
+/** A column's own refresh, returned from `onRender`: the refresh button calls it instead of re-rendering. */
+type ColumnRefresh = () => Promise<void>
+
 /** Author-facing options for {@linkcode createColumnDefinition}: assets, header behaviour, and lifecycle callbacks. */
 interface ColumnDefinitionParams<
   S extends ColumnServices = ColumnServices,
@@ -103,6 +106,12 @@ interface ColumnDefinitionParams<
   readonly css?: string | ReadonlyArray<string> | null
   readonly html?: string | ReadonlyArray<string> | null
   readonly js?: string | ReadonlyArray<string> | null
+  /**
+   * The id of a registered `<template>` whose clone replaces the content element's children before every
+   * `onRender`. A column with a template gets no loading indicator from the deck, since the mount would remove it
+   * at once; a column that loads asynchronously calls `showLoading` itself.
+   */
+  readonly template?: string | null
   readonly hasClose?: boolean
   readonly hasRefresh?: boolean
   readonly hasLists?: boolean
@@ -110,8 +119,15 @@ interface ColumnDefinitionParams<
   readonly singleton?: boolean
   readonly menuItems?: ReadonlyArray<MenuItem> | null
   readonly getTitle?: (entityId?: string | null) => string
-  readonly onRender: (contentElement: HTMLElement, context: ColumnContext<S, State>) => Promise<void>
-  readonly onRefresh?: (contentElement: HTMLElement, context: ColumnContext<S, State>) => Promise<void>
+  /**
+   * Render the column. Resolve with a {@linkcode ColumnRefresh} to have the refresh button refresh in place,
+   * against the live DOM with the render's subscriptions intact; resolve with nothing to have refresh tear
+   * down and render again.
+   */
+  readonly onRender: (
+    contentElement: HTMLElement,
+    context: ColumnContext<S, State>,
+  ) => Promise<void | ColumnRefresh>
   readonly onMenuSelect?:
     | ((contentElement: HTMLElement, context: ColumnContext<S, State>, action: string) => void | Promise<void>)
     | null
@@ -146,6 +162,7 @@ const createColumnDefinition = <
   css = null,
   html = null,
   js = null,
+  template = null,
   hasClose = true,
   hasRefresh = true,
   hasLists = false,
@@ -154,7 +171,6 @@ const createColumnDefinition = <
   menuItems = null,
   getTitle = () => label,
   onRender,
-  onRefresh,
   onMenuSelect = null,
   onListSelect = null,
   onListsOpen = null,
@@ -162,6 +178,7 @@ const createColumnDefinition = <
 }: ColumnDefinitionParams<S, State>): ColumnDefinition<S> => {
   const columnState = new WeakMap<HTMLElement, State>()
   const columnTeardowns = new WeakMap<HTMLElement, Array<() => void>>()
+  const columnRefreshes = new WeakMap<HTMLElement, ColumnRefresh>()
 
   const getColumnState = (element: HTMLElement): State => {
     let state = columnState.get(element)
@@ -234,13 +251,17 @@ const createColumnDefinition = <
 
   const render = async (contentElement: HTMLElement, context: OuterColumnContext<S>): Promise<void> => {
     runTeardowns(contentElement)
-    showLoading(contentElement)
-    await onRender(contentElement, buildContext(contentElement, context))
+    columnRefreshes.delete(contentElement)
+    if (template) contentElement.replaceChildren(context.cloneTemplate(template))
+    else showLoading(contentElement)
+    const ownRefresh = await onRender(contentElement, buildContext(contentElement, context))
+    if (ownRefresh) columnRefreshes.set(contentElement, ownRefresh)
   }
 
   const refresh = async (contentElement: HTMLElement, context: OuterColumnContext<S>): Promise<void> => {
-    if (onRefresh) {
-      await onRefresh(contentElement, buildContext(contentElement, context))
+    const ownRefresh = columnRefreshes.get(contentElement)
+    if (ownRefresh) {
+      await ownRefresh()
       return
     }
     await render(contentElement, context)
@@ -298,6 +319,7 @@ export type {
   ColumnDefinition,
   ColumnDefinitionParams,
   ColumnLaunchFn,
+  ColumnRefresh,
   ColumnServices,
   ColumnStateShape,
   ListSelection,

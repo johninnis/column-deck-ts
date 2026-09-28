@@ -7,6 +7,7 @@ export type {
   ColumnDefinition,
   ColumnDefinitionParams,
   ColumnLaunchFn,
+  ColumnRefresh,
   ColumnServices,
   ColumnStateShape,
   ListSelection,

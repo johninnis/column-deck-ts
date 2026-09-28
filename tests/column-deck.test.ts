@@ -106,11 +106,10 @@ const makeDeck = async (overrides: DeckOverrides = {}) => {
         label: "Feed",
         onRender: (_el, context) => {
           context.onTeardown(() => teardowns.push("feed"))
-          return Promise.resolve()
-        },
-        onRefresh: () => {
-          refreshes.push("feed")
-          return Promise.resolve()
+          return Promise.resolve(() => {
+            refreshes.push("feed")
+            return Promise.resolve()
+          })
         },
       }),
       createColumnDefinition({
@@ -152,7 +151,7 @@ Deno.test("createColumnDeck - closeColumn removes the column and persists the la
   deck.destroy()
 })
 
-Deno.test("createColumnDeck - refreshColumn runs the definition's onRefresh", async () => {
+Deno.test("createColumnDeck - refreshColumn runs the refresh the column's render returned", async () => {
   const { deck, refreshes } = await makeDeck()
   const key = await deck.launchColumn("feed")
   await deck.refreshColumn(key)

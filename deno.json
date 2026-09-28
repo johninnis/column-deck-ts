@@ -1,6 +1,6 @@
 {
   "name": "@innis/column-deck",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publish": {
     "exclude": ["tests/", "examples/", "deno.lock", ".github/"]
   },
