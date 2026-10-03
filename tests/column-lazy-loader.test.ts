@@ -1,7 +1,6 @@
 import { assertEquals } from "@std/assert"
 import { DOMParser, Element as DenoDomElement } from "deno-dom"
 import type { Column } from "../src/column-state.ts"
-import type { ColumnShell } from "../src/column-shell.ts"
 import { createColumnLazyLoader } from "../src/column-lazy-loader.ts"
 
 interface ObserverInstance {
@@ -20,9 +19,7 @@ const installFakeIntersectionObserver = (): { readonly instances: ReadonlyArray<
       instances.push({
         observed: this.#observed,
         fire: (target, isIntersecting) => {
-          // deno-lint-ignore innis/no-type-assertions
           const entry = { target, isIntersecting } as unknown as IntersectionObserverEntry
-          // deno-lint-ignore innis/no-type-assertions
           this.#callback([entry], this as unknown as IntersectionObserver)
         },
       })
@@ -66,17 +63,6 @@ const makeElement = (column: Column): HTMLElement => {
   return element
 }
 
-const makeShell = (element: HTMLElement): ColumnShell => ({
-  element,
-  getContentElement: () => element,
-  setPinned: () => {},
-  updateTitle: () => {},
-  updateMenuItems: () => {},
-  updateListItems: () => {},
-  updateHeaderStatus: () => {},
-  destroy: () => {},
-})
-
 const requireObserver = (instances: ReadonlyArray<ObserverInstance>): ObserverInstance => {
   const first = instances[0]
   if (!first) throw new Error("expected observer to be created")
@@ -96,7 +82,7 @@ Deno.test("createColumnLazyLoader - fires loadColumn when an enqueued element be
 
   const column = makeColumn("feed")
   const element = makeElement(column)
-  loader.enqueue(column, makeShell(element))
+  loader.enqueue(column, element)
 
   const observer = requireObserver(handle.instances)
   assertEquals(observer.observed.has(element), true)
@@ -119,7 +105,7 @@ Deno.test("createColumnLazyLoader - ignores non-intersecting entries", () => {
 
   const column = makeColumn("feed")
   const element = makeElement(column)
-  loader.enqueue(column, makeShell(element))
+  loader.enqueue(column, element)
 
   const observer = requireObserver(handle.instances)
   observer.fire(element, false)
@@ -141,7 +127,7 @@ Deno.test("createColumnLazyLoader - cancel unobserves and prevents the load", ()
 
   const column = makeColumn("feed")
   const element = makeElement(column)
-  loader.enqueue(column, makeShell(element))
+  loader.enqueue(column, element)
   loader.cancel(column.key)
 
   const observer = requireObserver(handle.instances)
@@ -168,8 +154,8 @@ Deno.test("createColumnLazyLoader - reuses a single observer across enqueues", (
 
   const a = makeColumn("a")
   const b = makeColumn("b")
-  loader.enqueue(a, makeShell(makeElement(a)))
-  loader.enqueue(b, makeShell(makeElement(b)))
+  loader.enqueue(a, makeElement(a))
+  loader.enqueue(b, makeElement(b))
 
   assertEquals(handle.instances.length, 1)
   const observer = requireObserver(handle.instances)

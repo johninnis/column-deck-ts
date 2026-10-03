@@ -10,10 +10,10 @@ interface KeyboardHandler {
 
 interface KeyboardHandlerDeps {
   readonly containerElement: HTMLElement
-  readonly getLastFocusedElement: () => HTMLElement | null
+  readonly getFocusedColumnElement: () => HTMLElement | null
   readonly onFocusColumn: (key: ColumnKey) => void
   readonly onUndo: () => void
-  readonly onMoveColumn: (key: ColumnKey, direction: number) => boolean
+  readonly onMoveColumn: (key: ColumnKey, direction: number) => void
   readonly onClose: (key: ColumnKey) => void
   readonly onRefresh: (key: ColumnKey) => void
   readonly onEscape?: (() => boolean) | undefined
@@ -22,7 +22,7 @@ interface KeyboardHandlerDeps {
 const createKeyboardHandler = (deps: KeyboardHandlerDeps): KeyboardHandler => {
   const {
     containerElement,
-    getLastFocusedElement,
+    getFocusedColumnElement,
     onFocusColumn,
     onUndo,
     onMoveColumn,
@@ -60,10 +60,10 @@ const createKeyboardHandler = (deps: KeyboardHandlerDeps): KeyboardHandler => {
     if (event.defaultPrevented) return
     const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const isInInput = activeElement?.matches("input, textarea, [contenteditable]") === true
-    const column = getLastFocusedElement()
+    const column = getFocusedColumnElement()
 
     if (event.key === "Escape") {
-      if (onEscape && onEscape()) return
+      if (onEscape?.()) return
       activeElement?.blur()
       return
     }
@@ -93,15 +93,11 @@ const createKeyboardHandler = (deps: KeyboardHandlerDeps): KeyboardHandler => {
 
     if (event.ctrlKey || event.metaKey) return
 
-    if (event.key === "x") {
-      const focusedColumn = activeElement?.closest<HTMLElement>("[data-column]") ?? null
-      const key = focusedColumn && focusedColumn.dataset.pinned === undefined
-        ? getColumnKeyFromElement(focusedColumn)
-        : null
-      if (key !== null) {
-        event.preventDefault()
-        onClose(key)
-      }
+    if (event.key === "x" && column) {
+      const key = getColumnKeyFromElement(column)
+      if (key === null) return
+      event.preventDefault()
+      onClose(key)
       return
     }
 
@@ -114,6 +110,7 @@ const createKeyboardHandler = (deps: KeyboardHandlerDeps): KeyboardHandler => {
   }
 
   const attach = (): void => {
+    // Deliberate: on document, not the mount, so keys work while focus sits on body — see ADR-0008
     document.addEventListener("keydown", handleKeyDown)
   }
 

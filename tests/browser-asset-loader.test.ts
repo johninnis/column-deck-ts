@@ -106,3 +106,25 @@ Deno.test("createBrowserAssetLoader - loadHtml rejects with ColumnLifecycleError
     fetchStub.restore()
   }
 })
+
+const failInjected = (tag: string, path: string): void => {
+  for (const el of headElements(tag)) {
+    const onerror = Reflect.get(el, "onerror")
+    const source = el.getAttribute("href") ?? el.getAttribute("src")
+    if (source === path && typeof onerror === "function") onerror()
+  }
+}
+
+Deno.test("createBrowserAssetLoader - loadCss rejects with ColumnLifecycleError when the stylesheet fails to load", async () => {
+  const loader = createBrowserAssetLoader()
+  const loading = loader.loadCss("/css/missing.css")
+  failInjected("link", "/css/missing.css")
+  await assertRejects(() => loading, ColumnLifecycleError)
+})
+
+Deno.test("createBrowserAssetLoader - loadJs rejects with ColumnLifecycleError when the script fails to load", async () => {
+  const loader = createBrowserAssetLoader()
+  const loading = loader.loadJs("/js/missing.js")
+  failInjected("script", "/js/missing.js")
+  await assertRejects(() => loading, ColumnLifecycleError)
+})

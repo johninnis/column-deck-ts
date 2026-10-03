@@ -4,7 +4,6 @@ import {
   clearStack,
   historyOf,
   type MobileStack,
-  popTop,
   seedStack,
   suspendOnto,
   unwindTo,
@@ -37,15 +36,6 @@ Deno.test("suspendOnto cools the oldest suspended entry once the cap is exceeded
     [change.destroyed, change.stack[0]?.kind, change.stack.length, historyOf(change.stack)[0]],
     [[first], "cold", 9, { type: "note", entityId: "0" }],
   )
-})
-
-Deno.test("popTop returns the top entry and the rest; null on an empty stack", () => {
-  const stack = suspendMany([], [column("feed"), column("note", "1")])
-  const popped = popTop(stack)
-  assertEquals([popped?.entry.kind, historyOf(popped?.stack ?? []), popTop([])], ["suspended", [{
-    type: "feed",
-    entityId: null,
-  }], null])
 })
 
 Deno.test("unwindTo returns the most recent suspended entry for the key, what was above it for destruction, and the stack below", () => {

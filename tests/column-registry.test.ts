@@ -3,51 +3,29 @@ import { createColumnRegistry } from "../src/column-registry.ts"
 import { createColumnDefinition } from "../src/column-base.ts"
 import type { ColumnDefinition } from "../src/column-base.ts"
 
-const createMockDefinition = (): ColumnDefinition =>
-  createColumnDefinition({ type: "mock", label: "Mock", onRender: () => Promise.resolve() })
+const definitionOf = (type: string): ColumnDefinition =>
+  createColumnDefinition({ type, label: type, onRender: () => Promise.resolve() })
 
-Deno.test("createColumnRegistry - has returns false for unregistered type", () => {
-  const registry = createColumnRegistry()
-  assertEquals(registry.has("feed"), false)
+Deno.test("createColumnRegistry - has is false for a type no definition declares", () => {
+  assertEquals(createColumnRegistry([definitionOf("feed")]).has("search"), false)
 })
 
-Deno.test("createColumnRegistry - get returns null for unregistered type", () => {
-  const registry = createColumnRegistry()
-  assertEquals(registry.get("feed"), null)
+Deno.test("createColumnRegistry - get is null for a type no definition declares", () => {
+  assertEquals(createColumnRegistry([definitionOf("feed")]).get("search"), null)
 })
 
-Deno.test("createColumnRegistry - register and has returns true", () => {
-  const registry = createColumnRegistry()
-  const def = createMockDefinition()
-  registry.register("feed", def)
-  assertEquals(registry.has("feed"), true)
+Deno.test("createColumnRegistry - has is true for a declared type", () => {
+  assertEquals(createColumnRegistry([definitionOf("feed")]).has("feed"), true)
 })
 
-Deno.test("createColumnRegistry - register and get returns the definition", () => {
-  const registry = createColumnRegistry()
-  const def = createMockDefinition()
-  registry.register("feed", def)
-  assertEquals(registry.get("feed"), def)
+Deno.test("createColumnRegistry - get finds each definition by its own type", () => {
+  const feed = definitionOf("feed")
+  const profile = definitionOf("profile")
+  const registry = createColumnRegistry([feed, profile])
+  assertEquals([registry.get("feed"), registry.get("profile")], [feed, profile])
 })
 
-Deno.test("createColumnRegistry - register multiple types independently", () => {
-  const registry = createColumnRegistry()
-  const feedDef = createMockDefinition()
-  const profileDef = createMockDefinition()
-  registry.register("feed", feedDef)
-  registry.register("profile", profileDef)
-  assertEquals(registry.get("feed"), feedDef)
-  assertEquals(registry.get("profile"), profileDef)
-  assertEquals(registry.has("feed"), true)
-  assertEquals(registry.has("profile"), true)
-  assertEquals(registry.has("search"), false)
-})
-
-Deno.test("createColumnRegistry - register overwrites existing definition", () => {
-  const registry = createColumnRegistry()
-  const def1 = createMockDefinition()
-  const def2 = createMockDefinition()
-  registry.register("feed", def1)
-  registry.register("feed", def2)
-  assertEquals(registry.get("feed"), def2)
+Deno.test("createColumnRegistry - a later definition of the same type wins", () => {
+  const later = definitionOf("feed")
+  assertEquals(createColumnRegistry([definitionOf("feed"), later]).get("feed"), later)
 })

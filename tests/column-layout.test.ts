@@ -2,7 +2,15 @@ import { assertEquals } from "@std/assert"
 import { DOMParser, Element as DenoDomElement } from "deno-dom"
 import type { ColumnKey, ColumnState } from "../src/column-state.ts"
 import { addColumn, createColumn, createColumnState } from "../src/column-state.ts"
-import { applyLayoutOp, moveColumnByKeyboard, repositionPinned, resolveInsertAfterKey } from "../src/column-layout.ts"
+import {
+  applyLayoutOp,
+  indexBeside,
+  indexByStep,
+  moveColumn,
+  placementAfter,
+  repositionPinned,
+  resolveInsertAfterKey,
+} from "../src/column-layout.ts"
 import type { LayoutDeps } from "../src/column-layout.ts"
 
 let domReady = false
@@ -76,6 +84,32 @@ Deno.test("resolveInsertAfterKey - returns the spawn key when it is the last pin
   assertEquals(resolveInsertAfterKey(state, "pinned-b"), "pinned-b")
 })
 
+Deno.test("placementAfter - places after an open column outside the pinned region", () => {
+  const { state } = buildWorld([{ type: "pinned-a", pinned: true }, { type: "regular-a" }])
+
+  assertEquals(placementAfter(state, "regular-a", "last"), { after: "regular-a" })
+})
+
+Deno.test("placementAfter - never places inside the pinned region", () => {
+  const { state } = buildWorld([{ type: "pinned-a", pinned: true }, { type: "pinned-b", pinned: true }])
+
+  assertEquals(placementAfter(state, "pinned-a", "last"), { after: "pinned-b" })
+})
+
+Deno.test("placementAfter - without an open column falls back, keeping a head placement behind the pinned region", () => {
+  const pinned = buildWorld([{ type: "pinned-a", pinned: true }, { type: "regular-a" }]).state
+  const unpinned = buildWorld([{ type: "regular-a" }]).state
+
+  assertEquals(
+    [
+      placementAfter(pinned, null, "first"),
+      placementAfter(unpinned, "missing", "first"),
+      placementAfter(pinned, null, "last"),
+    ],
+    [{ after: "pinned-a" }, "first", "last"],
+  )
+})
+
 Deno.test("repositionPinned - pinning moves the column to the end of the pinned region and plans an insert-before its successor", () => {
   const { state, elements, deps } = buildWorld([
     { type: "pinned-a", pinned: true },
@@ -86,7 +120,6 @@ Deno.test("repositionPinned - pinning moves the column to the end of the pinned 
   const result = repositionPinned({ state, key: "regular-b", pinned: true, deps })
 
   assertEquals(result.state.columns.map((c) => c.type), ["pinned-a", "regular-b", "regular-a"])
-  assertEquals(result.element, requireElement(elements, "regular-b"))
   assertEquals(result.op, {
     kind: "insert-before",
     element: requireElement(elements, "regular-b"),
@@ -132,90 +165,124 @@ Deno.test("repositionPinned - returns no op when the column is already at the ta
   assertEquals(result.state.columns.map((c) => c.type), ["pinned-a", "regular-a"])
 })
 
-Deno.test("moveColumnByKeyboard - moves right and plans insert-before the new successor", () => {
+Deno.test("moveColumn - moves right and plans insert-before the new successor", () => {
   const { state, elements, deps } = buildWorld([
     { type: "regular-a" },
     { type: "regular-b" },
     { type: "regular-c" },
   ])
 
-  const result = moveColumnByKeyboard({ state, key: "regular-a", direction: 1, deps })
+  const result = moveColumn({ state, key: "regular-a", toIndex: 1, deps })
 
-  assertEquals(result.moved, true)
-  assertEquals(result.state.columns.map((c) => c.type), ["regular-b", "regular-a", "regular-c"])
-  assertEquals(result.op, {
+  assertEquals(result?.state.columns.map((c) => c.type), ["regular-b", "regular-a", "regular-c"])
+  assertEquals(result?.op, {
     kind: "insert-before",
     element: requireElement(elements, "regular-a"),
     anchor: requireElement(elements, "regular-c"),
   })
 })
 
-Deno.test("moveColumnByKeyboard - moves right to the end and plans an append", () => {
+Deno.test("moveColumn - moves right to the end and plans an append", () => {
   const { state, elements, deps } = buildWorld([{ type: "regular-a" }, { type: "regular-b" }])
 
-  const result = moveColumnByKeyboard({ state, key: "regular-a", direction: 1, deps })
+  const result = moveColumn({ state, key: "regular-a", toIndex: 1, deps })
 
-  assertEquals(result.moved, true)
-  assertEquals(result.state.columns.map((c) => c.type), ["regular-b", "regular-a"])
-  assertEquals(result.op, { kind: "append", element: requireElement(elements, "regular-a") })
+  assertEquals(result?.state.columns.map((c) => c.type), ["regular-b", "regular-a"])
+  assertEquals(result?.op, { kind: "append", element: requireElement(elements, "regular-a") })
 })
 
-Deno.test("moveColumnByKeyboard - moves left and plans a prepend when landing at index zero", () => {
+Deno.test("moveColumn - moves left and plans a prepend when landing at index zero", () => {
   const { state, elements, deps } = buildWorld([{ type: "regular-a" }, { type: "regular-b" }])
 
-  const result = moveColumnByKeyboard({ state, key: "regular-b", direction: -1, deps })
+  const result = moveColumn({ state, key: "regular-b", toIndex: 0, deps })
 
-  assertEquals(result.moved, true)
-  assertEquals(result.state.columns.map((c) => c.type), ["regular-b", "regular-a"])
-  assertEquals(result.op, { kind: "prepend", element: requireElement(elements, "regular-b") })
+  assertEquals(result?.state.columns.map((c) => c.type), ["regular-b", "regular-a"])
+  assertEquals(result?.op, { kind: "prepend", element: requireElement(elements, "regular-b") })
 })
 
-Deno.test("moveColumnByKeyboard - refuses to cross from regular into pinned region", () => {
+Deno.test("moveColumn - refuses to cross from regular into pinned region", () => {
   const { state, deps } = buildWorld([
     { type: "pinned-a", pinned: true },
     { type: "regular-a" },
   ])
 
-  const result = moveColumnByKeyboard({ state, key: "regular-a", direction: -1, deps })
+  const result = moveColumn({ state, key: "regular-a", toIndex: 0, deps })
 
-  assertEquals(result.moved, false)
-  assertEquals(result.op, null)
+  assertEquals(result, null)
 })
 
-Deno.test("moveColumnByKeyboard - refuses to cross from pinned into regular region", () => {
+Deno.test("moveColumn - refuses to cross from pinned into regular region", () => {
   const { state, deps } = buildWorld([
     { type: "pinned-a", pinned: true },
     { type: "regular-a" },
   ])
 
-  const result = moveColumnByKeyboard({ state, key: "pinned-a", direction: 1, deps })
+  const result = moveColumn({ state, key: "pinned-a", toIndex: 1, deps })
 
-  assertEquals(result.moved, false)
-  assertEquals(result.op, null)
+  assertEquals(result, null)
 })
 
-Deno.test("moveColumnByKeyboard - refuses to move past the ends of the column list", () => {
+Deno.test("moveColumn - refuses to move past the ends of the column list", () => {
   const { state, deps } = buildWorld([{ type: "regular-a" }, { type: "regular-b" }])
 
-  assertEquals(moveColumnByKeyboard({ state, key: "regular-a", direction: -1, deps }).moved, false)
-  assertEquals(moveColumnByKeyboard({ state, key: "regular-b", direction: 1, deps }).moved, false)
+  assertEquals(moveColumn({ state, key: "regular-a", toIndex: -1, deps }), null)
+  assertEquals(moveColumn({ state, key: "regular-b", toIndex: 2, deps }), null)
 })
 
-Deno.test("moveColumnByKeyboard - refuses to move a column that is not in state", () => {
+Deno.test("moveColumn - refuses to move a column that is not in state", () => {
   const { state, deps } = buildWorld([{ type: "regular-a" }])
 
-  assertEquals(moveColumnByKeyboard({ state, key: "missing", direction: 1, deps }).moved, false)
+  assertEquals(moveColumn({ state, key: "missing", toIndex: 0, deps }), null)
 })
 
-Deno.test("moveColumnByKeyboard - refuses to move when the DOM element is missing", () => {
+Deno.test("moveColumn - refuses to move when the DOM element is missing", () => {
   const { state } = buildWorld([{ type: "regular-a" }, { type: "regular-b" }])
-  const result = moveColumnByKeyboard({
+  const result = moveColumn({
     state,
     key: "regular-a",
-    direction: 1,
+    toIndex: 1,
     deps: { getElement: () => undefined },
   })
-  assertEquals(result.moved, false)
+  assertEquals(result, null)
+})
+
+Deno.test("moveColumn - leaving a column where it is moves nothing", () => {
+  const { state, deps } = buildWorld([{ type: "regular-a" }, { type: "regular-b" }])
+
+  assertEquals(moveColumn({ state, key: "regular-a", toIndex: 0, deps }), null)
+})
+
+Deno.test("indexByStep - steps from the column's own index", () => {
+  const { state } = buildWorld([{ type: "a" }, { type: "b" }, { type: "c" }])
+
+  assertEquals([indexByStep(state, "b", -1), indexByStep(state, "b", 1)], [0, 2])
+})
+
+Deno.test("indexBeside - dropping before or after a column to the left lands beside it", () => {
+  const { state } = buildWorld([{ type: "a" }, { type: "b" }, { type: "c" }])
+
+  assertEquals([
+    indexBeside(state, "c", { key: "a", side: "before" }),
+    indexBeside(state, "c", { key: "a", side: "after" }),
+  ], [0, 1])
+})
+
+Deno.test("indexBeside - dropping before or after a column to the right lands beside it", () => {
+  const { state } = buildWorld([{ type: "a" }, { type: "b" }, { type: "c" }])
+
+  assertEquals([
+    indexBeside(state, "a", { key: "c", side: "before" }),
+    indexBeside(state, "a", { key: "c", side: "after" }),
+  ], [1, 2])
+})
+
+Deno.test("indexBeside - an unknown column gives no index", () => {
+  const { state } = buildWorld([{ type: "a" }, { type: "b" }])
+
+  assertEquals([
+    indexBeside(state, "a", { key: "missing", side: "before" }),
+    indexBeside(state, "missing", { key: "a", side: "after" }),
+  ], [-1, -1])
 })
 
 Deno.test("applyLayoutOp - prepend places the element first in the mount", () => {

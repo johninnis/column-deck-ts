@@ -1,19 +1,18 @@
 import type { Column, ColumnKey } from "./column-state.ts"
-import type { ColumnShell } from "./column-shell.ts"
 import { getColumnKeyFromElement } from "./column-dom.ts"
 
 interface PendingColumn {
   readonly column: Column
-  readonly shell: ColumnShell
+  readonly element: HTMLElement
 }
 
 interface ColumnLazyLoaderDeps {
   readonly mountElement: HTMLElement
-  readonly loadColumn: (column: Column, shell: ColumnShell) => void
+  readonly loadColumn: (column: Column) => void
 }
 
 interface ColumnLazyLoader {
-  readonly enqueue: (column: Column, shell: ColumnShell) => void
+  readonly enqueue: (column: Column, element: HTMLElement) => void
   readonly cancel: (key: ColumnKey) => void
   readonly disconnect: () => void
 }
@@ -33,22 +32,22 @@ const createColumnLazyLoader = ({ mountElement, loadColumn }: ColumnLazyLoaderDe
         if (!item) continue
         pending.delete(item.column.key)
         created.unobserve(entry.target)
-        loadColumn(item.column, item.shell)
+        loadColumn(item.column)
       }
     }, { root: mountElement, rootMargin: "200px" })
     observer = created
     return created
   }
 
-  const enqueue = (column: Column, shell: ColumnShell): void => {
-    pending.set(column.key, { column, shell })
-    getOrCreateObserver().observe(shell.element)
+  const enqueue = (column: Column, element: HTMLElement): void => {
+    pending.set(column.key, { column, element })
+    getOrCreateObserver().observe(element)
   }
 
   const cancel = (key: ColumnKey): void => {
     const entry = pending.get(key)
     if (!entry) return
-    observer?.unobserve(entry.shell.element)
+    observer?.unobserve(entry.element)
     pending.delete(key)
   }
 

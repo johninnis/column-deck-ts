@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert"
 import { DOMParser, Element as DenoDomElement } from "deno-dom"
+import type { DropTarget } from "../src/column-layout.ts"
 import { createDragHandler } from "../src/drag-handler.ts"
 
 let ready = false
@@ -15,11 +16,10 @@ setup()
 
 type DragListener = (event: DragEvent) => void
 
-const makeColumn = (key: string, options: { readonly pinned?: boolean } = {}): HTMLElement => {
+const makeColumn = (key: string): HTMLElement => {
   const column = document.createElement("article")
   column.setAttribute("data-column", "")
   column.dataset.columnKey = key
-  if (options.pinned) column.dataset.pinned = ""
   Object.defineProperty(column, "getBoundingClientRect", {
     value: (): { left: number; width: number } => ({ left: 100, width: 100 }),
     configurable: true,
@@ -30,7 +30,7 @@ const makeColumn = (key: string, options: { readonly pinned?: boolean } = {}): H
 interface Harness {
   readonly container: HTMLElement
   readonly columns: ReadonlyArray<HTMLElement>
-  readonly reorders: ReadonlyArray<{ from: number; to: number }>
+  readonly drags: ReadonlyArray<{ key: string; target: DropTarget }>
   readonly fire: (type: string, event: FakeDragEvent) => void
   readonly listenerCount: () => number
   readonly detach: () => void
@@ -42,25 +42,10 @@ interface FakeDragEvent {
   readonly clientX?: number | undefined
 }
 
-const makeHarness = (options: { readonly isMobile?: boolean; readonly pinnedFirst?: boolean } = {}): Harness => {
+const makeHarness = (options: { readonly isMobile?: boolean } = {}): Harness => {
   const container = document.createElement("main")
-  const columns = [
-    makeColumn("a", { pinned: options.pinnedFirst ?? false }),
-    makeColumn("b"),
-    makeColumn("c"),
-  ]
+  const columns = [makeColumn("a"), makeColumn("b"), makeColumn("c")]
   columns.forEach((column) => container.appendChild(column))
-
-  // deno-dom computes the reference index before detaching an already-inserted node,
-  // misplacing forward moves; detaching first restores spec-compliant behaviour.
-  const originalInsertBefore = container.insertBefore.bind(container)
-  Object.defineProperty(container, "insertBefore", {
-    value: (node: HTMLElement, ref: Node | null): Node => {
-      node.remove()
-      return originalInsertBefore(node, ref)
-    },
-    configurable: true,
-  })
 
   const listeners = new Map<string, DragListener>()
   Object.defineProperty(container, "addEventListener", {
@@ -76,10 +61,10 @@ const makeHarness = (options: { readonly isMobile?: boolean; readonly pinnedFirs
     configurable: true,
   })
 
-  const reorders: Array<{ from: number; to: number }> = []
+  const drags: Array<{ key: string; target: DropTarget }> = []
   const handler = createDragHandler({
     containerElement: container,
-    onReorder: (from, to) => reorders.push({ from, to }),
+    onDragOver: (key, target) => drags.push({ key, target }),
     isMobile: () => options.isMobile ?? false,
   })
   handler.attach()
@@ -87,11 +72,10 @@ const makeHarness = (options: { readonly isMobile?: boolean; readonly pinnedFirs
   const fire = (type: string, event: FakeDragEvent): void => {
     const listener = listeners.get(type)
     if (!listener) throw new Error(`no listener for ${type}`)
-    // deno-lint-ignore innis/no-type-assertions
     listener({ preventDefault: () => {}, ...event } as unknown as DragEvent)
   }
 
-  return { container, columns, reorders, fire, listenerCount: () => listeners.size, detach: handler.detach }
+  return { container, columns, drags, fire, listenerCount: () => listeners.size, detach: handler.detach }
 }
 
 const makeDataTransfer = (): {
@@ -114,7 +98,6 @@ const makeDataTransfer = (): {
 Deno.test("createDragHandler - dragstart marks the column and writes its key to the data transfer", () => {
   const { columns, fire } = makeHarness()
   const dataTransfer = makeDataTransfer()
-  // deno-lint-ignore innis/no-type-assertions
   fire("dragstart", { target: columns[1], dataTransfer: dataTransfer as unknown as DataTransfer })
   assertEquals(columns[1]?.hasAttribute("data-dragging"), true)
   assertEquals(dataTransfer.effectAllowed, "move")
@@ -127,48 +110,36 @@ Deno.test("createDragHandler - dragstart is ignored on mobile", () => {
   assertEquals(columns[1]?.hasAttribute("data-dragging"), false)
 })
 
-Deno.test("createDragHandler - dragging left of a column's midpoint moves the dragged element before it", () => {
-  const { container, columns, fire, reorders } = makeHarness()
+const keysOf = (container: HTMLElement): ReadonlyArray<string | null> =>
+  Array.from(container.querySelectorAll("[data-column]")).map((el) => el.getAttribute("data-column-key"))
+
+Deno.test("createDragHandler - dragging left of a column's midpoint asks to drop before it and moves nothing itself", () => {
+  const { container, columns, fire, drags } = makeHarness()
   fire("dragstart", { target: columns[1] })
   fire("dragover", { target: columns[0], clientX: 120 })
-  fire("dragend", {})
-  assertEquals(
-    Array.from(container.querySelectorAll("[data-column]")).map((el) => el.getAttribute("data-column-key")),
-    ["b", "a", "c"],
-  )
-  assertEquals(reorders, [{ from: 1, to: 0 }])
-  assertEquals(columns[1]?.hasAttribute("data-dragging"), false)
+  assertEquals([drags, keysOf(container)], [[{ key: "b", target: { key: "a", side: "before" } }], ["a", "b", "c"]])
 })
 
-Deno.test("createDragHandler - dragging right of a column's midpoint moves the dragged element after it", () => {
-  const { container, columns, fire, reorders } = makeHarness()
+Deno.test("createDragHandler - dragging right of a column's midpoint asks to drop after it", () => {
+  const { columns, fire, drags } = makeHarness()
   fire("dragstart", { target: columns[0] })
   fire("dragover", { target: columns[1], clientX: 180 })
-  fire("dragend", {})
-  assertEquals(
-    Array.from(container.querySelectorAll("[data-column]")).map((el) => el.getAttribute("data-column-key")),
-    ["b", "a", "c"],
-  )
-  assertEquals(reorders, [{ from: 0, to: 1 }])
+  assertEquals(drags, [{ key: "a", target: { key: "b", side: "after" } }])
 })
 
-Deno.test("createDragHandler - dragover over a pinned column is ignored", () => {
-  const { container, columns, fire, reorders } = makeHarness({ pinnedFirst: true })
+Deno.test("createDragHandler - dragging over the dragged column itself asks nothing", () => {
+  const { columns, fire, drags } = makeHarness()
   fire("dragstart", { target: columns[1] })
+  fire("dragover", { target: columns[1], clientX: 120 })
+  assertEquals(drags, [])
+})
+
+Deno.test("createDragHandler - dragend clears the dragging marker and ends the drag", () => {
+  const { columns, fire, drags } = makeHarness()
+  fire("dragstart", { target: columns[1] })
+  fire("dragend", {})
   fire("dragover", { target: columns[0], clientX: 120 })
-  fire("dragend", {})
-  assertEquals(
-    Array.from(container.querySelectorAll("[data-column]")).map((el) => el.getAttribute("data-column-key")),
-    ["a", "b", "c"],
-  )
-  assertEquals(reorders, [])
-})
-
-Deno.test("createDragHandler - dragend without movement does not report a reorder", () => {
-  const { columns, fire, reorders } = makeHarness()
-  fire("dragstart", { target: columns[1] })
-  fire("dragend", {})
-  assertEquals(reorders, [])
+  assertEquals([columns[1]?.hasAttribute("data-dragging"), drags], [false, []])
 })
 
 Deno.test("createDragHandler - detach removes the container listeners", () => {

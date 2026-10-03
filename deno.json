@@ -1,6 +1,6 @@
 {
   "name": "@innis/column-deck",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publish": {
     "exclude": ["tests/", "examples/", "deno.lock", ".github/"]
   },
@@ -10,7 +10,10 @@
   },
   "license": "MIT",
   "description": "Multi-column UI framework: lifecycle, registry, mount/teardown, drag-to-reorder, keyboard shortcuts, mobile back-stack, sessionStorage-backed persistence. Domain-agnostic — every column is a black box.",
-  "exports": "./mod.ts",
+  "exports": {
+    ".": "./mod.ts",
+    "./testing": "./testing.ts"
+  },
   "compilerOptions": {
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -29,21 +32,23 @@
     "deno-dom": "https://deno.land/x/deno_dom@v0.1.48/deno-dom-wasm.ts"
   },
   "tasks": {
-    "check": "deno check mod.ts src/ tests/ examples/",
+    "check": "deno check mod.ts testing.ts src/ tests/ examples/",
     "example:minimal-host": "deno bundle --platform browser --outdir examples/minimal-host/dist examples/minimal-host/main.ts && deno run --allow-net --allow-read jsr:@std/http@^1/file-server examples/minimal-host --port 8088",
-    "lint": "deno lint",
+    // Tests run under deno-dom outside a browser, so these stand in for DOM platform types (events, fragments, observers) the runtime cannot construct
+    "lint": "deno lint --ignore=cov_profile/,tests/column-lazy-loader.test.ts,tests/column-shell.test.ts,tests/drag-handler.test.ts,tests/keyboard-handler.test.ts,tests/support/column-base-mocks.ts,tests/support/deck-harness.ts && deno lint --rules-exclude=innis/no-type-assertions tests/column-lazy-loader.test.ts tests/column-shell.test.ts tests/drag-handler.test.ts tests/keyboard-handler.test.ts tests/support/column-base-mocks.ts tests/support/deck-harness.ts",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check",
     "test": "deno test -A",
-    "coverage": "rm -rf cov_profile && deno test -A --coverage=cov_profile && deno coverage cov_profile --lcov --output=cov_profile/lcov.info && deno coverage cov_profile && deno run --allow-read jsr:@innis/coding-standards@^0.1.0/check-coverage",
-    "exports-tested": "deno run --allow-read --allow-run jsr:@innis/coding-standards@^0.1.0/check-exports-tested",
-    "docs": "deno run --allow-read --allow-run jsr:@innis/coding-standards@^0.1.0/check-docs",
+    "coverage": "rm -rf cov_profile && deno test -A --coverage=cov_profile && deno coverage cov_profile --lcov --output=cov_profile/lcov.info && deno coverage cov_profile && deno run --allow-read jsr:@innis/coding-standards@^0.2.3/check-coverage",
+    "exports-tested": "deno run --allow-read --allow-run jsr:@innis/coding-standards@^0.2.3/check-exports-tested",
+    "docs": "deno run --allow-read --allow-run jsr:@innis/coding-standards@^0.2.3/check-docs",
+    "lint-exemptions": "deno run --allow-read --allow-run jsr:@innis/coding-standards@^0.2.3/check-lint-exemptions",
     "publish:dry": "deno publish --dry-run",
-    "ci": "deno task fmt:check && deno task lint && deno task check && deno task coverage && deno task exports-tested && deno task docs"
+    "ci": "deno task fmt:check && deno task lint && deno task lint-exemptions && deno task check && deno task coverage && deno task exports-tested && deno task docs"
   },
   "lint": {
     "plugins": [
-      "jsr:@innis/coding-standards@^0.1.0/lint-plugin"
+      "jsr:@innis/coding-standards@^0.2.3/lint-plugin"
     ],
     "rules": {
       "include": [

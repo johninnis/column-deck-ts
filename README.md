@@ -79,9 +79,9 @@ Nothing else is required: the deck supplies the column shell, a browser asset lo
 ### Top-level — `column-deck.ts`
 
 ```ts
-const system = await createColumnDeck({
+const deck = await createColumnDeck({
     mountElement,
-    columnDefinitions?,           // pre-registered ColumnDefinition<S>[]
+    columnDefinitions?,           // ColumnDefinition<S>[]
     services,                     // S — the dependency bag every column receives
     assetLoader?,                 // AssetLoader — default createBrowserAssetLoader()
     shellTemplate?,               // () => DocumentFragment — default: the deck's own shell (below)
@@ -97,21 +97,30 @@ const system = await createColumnDeck({
 
 Only `mountElement`, `services` and the column definitions are the host's to supply. The four infrastructure seams default to the deck's browser implementations and are overridable: pass your own `AssetLoader` when templates live somewhere other than fetched HTML files, your own `shellTemplate` to restyle the column chrome, your own `PersistenceAdapter` to key the layout per user, your own `isMobile` for a different breakpoint.
 
-Returns a `ColumnDeck` with `launchColumn`, `closeColumn`, `refreshColumn`, `undo` (re-open last closed), `goBack` (mobile-history pop), `getState`, `getColumnCount`, `getFocusedColumnElement` (the last-focused column's element, so the host can bind keys that act inside a column — the deck itself binds only column-level keys), `getMobileHistory`, `setPinned`, and `destroy` (close every open column — running each column's teardowns — and detach the drag/keyboard handlers and observers).
+Returns a `ColumnDeck`:
 
-Launching an unregistered column type rejects with `ColumnLifecycleError` before any state changes.
+| Member | What it does |
+| --- | --- |
+| `launchColumn(type, entityId?)` | Opens a column, or focuses it when one with the same key is open (a singleton showing another entity re-renders with the new one). Resolves with the column key once it has rendered. Rejects with `ColumnLifecycleError` for an unregistered type, before any state changes. |
+| `closeColumn(key)` | Closes a column, running its teardowns. A pinned column is not closed. On mobile, closing the current column goes back to the previous one. |
+| `refreshColumn(key)` | Runs the `refresh` the column's render returned, or renders it again. |
+| `undo()` | Re-opens the last closed column where it was (up to fifty are remembered). |
+| `goBack()` | Pops the mobile back-stack. |
+| `setPinned(key, pinned)` | Pins or unpins a column: moves it in or out of the pinned region at the head of the deck and updates its chrome. |
+| `getState()`, `getColumnCount()` | The current layout. |
+| `getFocusedColumnElement()` | The focused column's element, so the host can bind keys that act inside a column. |
+| `getMobileHistory()` | The mobile back-stack, read-only. |
+| `destroy()` | Closes every open and suspended column, running their teardowns, and detaches the drag and keyboard handlers and observers. |
 
-The deck owns the mobile back-stack. Seed it with `initialMobileHistory`, observe changes via `onMobileHistoryChange`, and read it with `getMobileHistory()` — there is no shared mutable array crossing the API boundary. On mobile, navigating forward *suspends* the current column rather than closing it: its element is detached with its subscriptions and its render's handlers intact and its scroll position remembered, and `goBack()` re-attaches it exactly as it was. Launching a column that is already suspended on the stack unwinds to it (closing everything above). At most eight suspended columns are kept alive; older ones are destroyed and re-rendered fresh if you return to them. `destroy()` destroys suspended columns too. Navigation notifies `onMobileHistoryChange` and moves focus as soon as the new shell is mounted — the column's own render continues behind it; the renderer yields one frame between mounting a shell and rendering its content so the chrome paints before a heavy render.
+The deck owns the mobile back-stack. Seed it with `initialMobileHistory`, observe changes via `onMobileHistoryChange`, and read it with `getMobileHistory()`. On mobile, navigating forward *suspends* the current column rather than closing it: its element is detached with its render's work and handlers intact and its scroll position remembered, and `goBack()` re-attaches it exactly as it was. Launching a column that is already suspended on the stack unwinds to it (closing everything above). At most eight suspended columns are kept alive; older ones are destroyed and rendered fresh if you return to them. Closing the current column goes back; `undo()` navigates to the column last closed. Navigation notifies `onMobileHistoryChange` and moves focus as soon as the new shell is mounted, and the column renders behind it.
 
-On desktop the layout is written to `persistence.save` on every state change and restored through `persistence.load` on construction. On mobile the deck neither saves nor restores it; the back-stack is the host's to seed through `initialMobileHistory`. One adapter is the single persistence channel.
+On desktop the layout is written to `persistence.save` on every change and restored through `persistence.load` on construction; restored columns render as they come into view. On mobile the deck neither saves nor restores it.
 
-`createColumnDeck<S>` is generic over the services type: the `services` value and every registered `ColumnDefinition<S>` must agree on `S`, checked at the call site. A definition declaring a narrower services requirement is assignable to a system holding a wider bag.
-
-`createColumnDeck` is the only construction surface most callers need. It wires the registry, manager, renderer, drag handler, keyboard handler, and shell renderer in one call.
+`createColumnDeck<S>` is generic over the services type: the `services` value and every registered `ColumnDefinition<S>` must agree on `S`, checked at the call site. A definition declaring a narrower services requirement is assignable to a deck holding a wider bag.
 
 ### Asset loader — `browser-asset-loader.ts`
 
-`createBrowserAssetLoader()` is the default `AssetLoader`: each CSS path becomes one `<link>` and each JS path one `<script type="module">` in `document.head` (deduplicated per path, in flight or done); each HTML path is fetched once and every `<template>` in it is registered by id; `cloneTemplate(id)` returns a fresh fragment of a registered template, and fills any `[data-partial="<id>"]` element inside it with a clone of template `<id>` (one pass, not recursive). A missing template or a failed load throws `ColumnLifecycleError`. Column definitions' `css`/`html`/`js` paths and `assetPaths` go through whichever loader the deck was given, so a host that constructs its own loader should pass that instance in and reuse it for its own cloning.
+`createBrowserAssetLoader()` is the default `AssetLoader`: each CSS path becomes one `<link>` and each JS path one `<script type="module">` in `document.head` (deduplicated per path, in flight or done); each HTML path is fetched once and every `<template>` in it is registered by id; `cloneTemplate(id)` returns a fresh fragment of a registered template, and fills any `[data-partial="<id>"]` element inside it with a clone of template `<id>` (one pass, not recursive). A missing template, or any asset that fails to load, throws or rejects with `ColumnLifecycleError`; a failed path is retried on the next load. Column definitions' `css`/`html`/`js` paths and `assetPaths` go through whichever loader the deck was given, so a host that constructs its own loader should pass that instance in and reuse it for its own cloning.
 
 ### Shell template — `shell-template.ts`
 
@@ -119,7 +128,7 @@ Every column is mounted into a clone of the shell. The default shell is text-lab
 
 ### Styling contract
 
-The deck ships no CSS. It marks state with attributes for the host's stylesheet: `[data-column]` and `[data-column-key]` on every shell root, `[data-pinned]`, `[data-dragging]`, `[data-visible]` on an open `[data-menu-list]`/`[data-lists-list]`, `[data-separator]`, `[data-variant]` and `[data-selected]` on menu entries, `[data-loading]` on the loading indicator, `[data-status-bar]` on the title, and the `hidden` attribute (the close button of a pinned column, for one) — so a host stylesheet must let `[hidden]` win over its own `display` rules. Column focus lands on the header `h2`, so `header:focus-within` styles the focused column. The deck's own scrolling (bringing a column into view, double-clicking a header, `Home`/`End`) is smooth, and jumps instead when the reader prefers reduced motion.
+The deck ships no CSS. It marks state with attributes for the host's stylesheet: `[data-column]` and `[data-column-key]` on every shell root, `[data-pinned]`, `[data-dragging]`, `[data-visible]` on an open `[data-menu-list]`/`[data-lists-list]`, `[data-separator]`, `[data-variant]` and `[data-selected]` on menu entries, `[data-loading]` on the loading indicator, `[data-status-bar]` on the title, and the `hidden` attribute (the close button of a pinned column, for one) — so a host stylesheet must let `[hidden]` win over its own `display` rules. Column focus lands on the header `h2`, so `header:focus-within` styles the focused column. A column whose content does not scroll itself marks its scrolling element with `[data-scroll-region]`; the deck scrolls and remembers the scroll position of that element instead. The deck's own scrolling (bringing a column into view, double-clicking a header, `Home`/`End`) is smooth, and jumps instead when the reader prefers reduced motion.
 
 ### Column definition — `column-base.ts`
 
@@ -131,13 +140,13 @@ interface ColumnDefinitionParams<S> {
     readonly html?: string | string[]
     readonly js?: string | string[]
     readonly template?: string                    // mounted into the content before every onRender
-    readonly hasClose?: boolean
-    readonly hasRefresh?: boolean
-    readonly hasLists?: boolean
-    readonly hasPin?: boolean
-    readonly singleton?: boolean
+    readonly hasClose?: boolean                   // default true
+    readonly hasRefresh?: boolean                 // default true
+    readonly hasLists?: boolean                   // default false
+    readonly hasPin?: boolean                     // default true
+    readonly singleton?: boolean                  // default true
     readonly menuItems?: MenuItem[] | null        // MenuAction | MenuNotice | MenuSeparator
-    readonly getTitle?: (entityId?) => string
+    readonly getTitle?: (entityId?) => string     // default: the label
     readonly onRender: (content, context: ColumnContext<S>) => Promise<void | ColumnHandlers>
 }
 
@@ -151,16 +160,11 @@ interface ColumnHandlers {
 createColumnDefinition<S>(params): ColumnDefinition<S>
 ```
 
-The factory does three things:
-1. Normalises `css` / `html` / `js` to arrays and wraps them in a single `loadAssets(assetLoader)` call.
-2. Wires per-element teardown and handler registries (a `WeakMap` of element → teardown callbacks, a parallel one of element → the handlers the last render returned).
-3. Translates `OuterColumnContext` (passed by the manager) into the richer `ColumnContext` your render sees — adding `showLoading`, `hideLoading`, `onTeardown`, `trackHandle` and `signal`.
+A `ColumnDefinition` is opaque: you register it with the deck and read its `type` and `label`; the deck does the rest. Before every render the deck loads the definition's `css`/`html`/`js` through the asset loader (which dedups per path) and waits for the new shell to paint.
 
 `template`, when given, names a registered `<template>`; its clone replaces the content element's children before every `onRender`, so a column never clears and mounts its own markup. A column without one starts over the deck's loading indicator instead. A templated column that then waits on something calls `showLoading` itself, and shows what it can while it waits.
 
-Anything you `context.onTeardown(fn)` runs on close — and before every re-render, so a refresh never stacks a second subscription on top of the first.
-
-`onRender` may resolve with `ColumnHandlers`: what the refresh button, the header menu and the list selector call. Each is a closure over the render, so it acts on the live DOM with the render's subscriptions intact, and whatever a render needs to remember lives in its own local variables. Each may act synchronously or return a promise. Without a `refresh`, the refresh button tears the column down and renders it again. A re-render or a close forgets the previous render's handlers, and a render that a newer render overtook never installs its own.
+`onRender` may resolve with `ColumnHandlers`: what the refresh button, the header menu and the list selector call. Each is a closure over the render, so it acts on the live DOM with the render's work intact, and whatever a render needs to remember lives in its own local variables. Each may act synchronously or return a promise. Without a `refresh`, the refresh button renders the column again. A re-render or a close forgets the previous render's handlers, and a render that a newer render overtook never installs its own.
 
 `onListsOpen` is called when the user opens the column's list selector; populate it with `context.updateListItems`. `onListSelect` is called when an entry is chosen.
 
@@ -178,76 +182,108 @@ interface ColumnContext<S> {
     readonly close: () => void
     readonly showLoading: () => void
     readonly hideLoading: () => void
-    readonly onTeardown: (fn: () => void) => void
-    readonly trackHandle: <T extends { abort(): void }>(handle: T) => T
     readonly signal: AbortSignal
+    readonly onTeardown: (fn: () => void) => void
+    readonly signalSlot: () => SignalSlot         // { next(): AbortSignal; abort(): void }
     readonly services: S
 }
 ```
 
-Columns *only* see their context. They never see the registry, manager, or other columns. `services` is the application-supplied dependency bundle, typed end-to-end: `createColumnDefinition<S>` fixes the `S` your render receives, and `createColumnDeck` only accepts definitions compatible with the `services` value it was given. `trackHandle` registers an abortable handle's `abort` as a teardown and returns the handle. `signal` aborts when the render's teardowns run, so `target.addEventListener(type, handler, { signal })` needs no teardown of its own.
+Columns *only* see their context. They never see the registry, the deck's internals, or other columns. `services` is the application-supplied dependency bundle, typed end-to-end: `createColumnDefinition<S>` fixes the `S` your render receives, and `createColumnDeck` only accepts definitions compatible with the `services` value it was given.
+
+A render's lifetime is its `signal`: it aborts when the column re-renders or closes. Pass it to anything that takes one — `target.addEventListener(type, handler, { signal })`, `fetch(url, { signal })`, your own queries. `onTeardown(fn)` runs `fn` when the render ends, and at once if it already has, so a render that registers something after an `await` never leaks it. For work the render starts again, such as the query a refresh reloads, take a `signalSlot()` once and call `slot.next()` for each run: it aborts the signal it handed out before and returns a fresh one that also aborts when the render ends. `slot.abort()` stops the current run without starting another.
+
+```ts
+onRender: async (content, { signal, signalSlot, onTeardown, services }) => {
+    onTeardown(services.store.subscribe(render))            // a subscription that returns its unsubscribe
+    window.addEventListener("resize", layout, { signal })   // anything that takes a signal
+    const query = signalSlot()
+    const load = (): void => {
+        services.search(term, { signal: query.next() })      // each load aborts the previous one
+    }
+    load()
+    return { refresh: load }
+}
+```
+
+### Testing a column — `@innis/column-deck/testing`
+
+`openColumn(definition, host, element)` renders one definition into `element` outside any deck, with `host` (a `ColumnHost`: the entity, header callbacks, `launchColumn`, `close`, the asset loader and services) standing in for the deck. It resolves with the column's controls — `render`, `refresh`, `onMenuSelect`, `onListSelect`, `onListsOpen` and `destroy` — each doing what the matching deck control does, so a unit test drives a column exactly as a user would.
+
+```ts
+import { openColumn } from "@innis/column-deck/testing"
+
+const column = await openColumn(taskListColumn, { ...fakeHost, services }, document.createElement("section"))
+await column.refresh()
+column.destroy()
+```
 
 ### State — `column-state.ts`
 
-`ColumnKey = string` (`type` for singleton columns, `type:entityId` otherwise — singletons keep their bare `type` key even when bound to an entity). Pure functions:
+`ColumnKey = string` (`type` for singleton columns, `type:entityId` otherwise — singletons keep their bare `type` key even when bound to an entity). `getState()` returns a plain, immutable `{ columns, lastFocusedKey }` snapshot; each `Column` carries `type`, `entityId`, `key`, `spawnedFrom` and `pinned`.
 
-- `createColumn`, `createColumnState`, `addColumn`, `insertColumnAfter`, `removeColumn`, `reorderColumns`, `setLastFocused`, `findColumn`, `setColumnPinned`, `pinnedColumns`, `getPinnedCount`.
+### Drag + keyboard
 
-State is a plain `{ columns, lastFocusedKey }` shape. The manager holds the current value in a closure and writes the serialised form to the persistence adapter.
+Dragging a column's header moves it beside the column under the pointer; a column cannot be dragged into, or out of, the pinned region, and a pinned column cannot be dragged. On mobile dragging is off.
 
-### Registry — `column-registry.ts`
-
-`createColumnRegistry()` returns `{ register(type, definition), get(type), has(type) }`. The registry is the single lookup the manager uses when launching a column.
-
-### Manager — `column-manager.ts`
-
-Internal. Owns the live column list, mount/unmount, focus, drag-reorder, mobile back-stack, undo (re-open last closed; if the column was relaunched in the meantime, undo focuses it instead of duplicating it).
-
-### Renderer — `column-renderer.ts` + `column-shell.ts`
-
-Internal. The renderer mounts each column's chrome (header, refresh button, menu, close, pin), loads its assets via the shell, and calls the definition's `onRender`. DOM placement flows through the same layout ops used for pinning and keyboard moves. The shell exposes the per-column DOM the chrome lives on.
-
-### Drag + keyboard — `drag-handler.ts`, `keyboard-handler.ts`
-
-Internal. Both are scoped to the deck's mount element. The drag handler tracks pointer events on column headers and reorders via the manager. The keyboard handler (active outside inputs) binds: `ArrowLeft`/`ArrowRight` focus the previous/next column (with `Shift`: move the column), `Escape` blurs the active element (after the host's `onEscape` pre-handler), `Ctrl`/`Cmd`+`Z` re-opens the last closed column, `Home`/`End` scroll the column, `x` closes the unpinned column that contains the active element, `r` refreshes. Browser shortcuts (`Ctrl`/`Cmd` + `x`/`r`) are left alone, as is any keydown another handler has already `preventDefault`ed. Application shortcuts (launching a particular column, say) and keys that act *inside* a column (walking its items, activating one) are the host's: bind them on `document`, resolve the column with `getFocusedColumnElement()`, and `preventDefault` what you consume. Column focus lands on the header `h2` (style `header:focus-within`). Both handlers are wired by `createColumnDeck`.
+The keyboard handler listens on `document`, and ignores keys while an input, textarea or contenteditable has focus (except `Escape`), any keydown another handler has already `preventDefault`ed, and browser shortcuts (`Ctrl`/`Cmd` + `x`/`r`). It binds: `ArrowLeft`/`ArrowRight` focus the previous/next column (with `Shift`: move the column), `Escape` blurs the active element (after the host's `onEscape` pre-handler), `Ctrl`/`Cmd`+`Z` re-opens the last closed column, `Home`/`End` scroll the column, `x` closes the column, `r` refreshes it. Every column key acts on the focused column — the one `getFocusedColumnElement()` returns, which follows clicks, focus and scrolling. Application shortcuts (launching a particular column, say) and keys that act *inside* a column (walking its items, activating one) are the host's: bind them on `document`, resolve the column with `getFocusedColumnElement()`, and `preventDefault` what you consume. Middle-clicking a header closes the column; scrolling the wheel over a header scrolls the deck sideways.
 
 ### Errors — `errors.ts`
 
-`ColumnLifecycleError` — a tagged `Error` (`tag: "ColumnLifecycleError"`) for framework-lifecycle violations: launching or mounting an unregistered column type (`column-manager.ts`, `column-renderer.ts`), a required shell element or shell root missing (`column-shell.ts`), or, in the browser asset loader, cloning an unregistered template id or failing to load an HTML or JS asset (`browser-asset-loader.ts`).
+`ColumnLifecycleError` — a tagged `Error` (`tag: "ColumnLifecycleError"`) for framework-lifecycle violations: launching an unregistered column type, a required shell element or shell root missing, or, in the browser asset loader, cloning an unregistered template id or failing to load a CSS, HTML or JS asset.
+
+A failure in work the deck starts from a click, a key or a column coming into view (refreshing, closing, a header handler, a lazy render) is passed to `reportError`, so it reaches the global `error` event like any exception from an event listener. Promises you await yourself reject to you.
 
 ## Lifecycle
 
 ```
 launchColumn(type, entityId)
     │
-    ├─ registry.get(type) -> ColumnDefinition    -- unknown type throws here
+    ├─ unknown type rejects here, before any state changes
+    ├─ the deck adds the Column { type, entityId, key, ... } to its state
+    ├─ clones the shell template and mounts it in place
     │
-    ├─ definition.loadAssets(assetLoader)        -- runs every render; the asset loader dedups
+    ├─ loads the definition's css / html / js       -- every render; the asset loader dedups
+    ├─ yields one paint
+    ├─ mounts definition.template into the content (or the loading indicator, without one)
     │
-    ├─ manager creates Column { type, entityId, key, ... }
-    ├─ renderer clones the shell template and mounts it
-    ├─ definition.template is mounted into the content (or the loading indicator, without one)
-    │
-    ├─ definition.onRender(content, context)     -- your code runs here and returns its handlers
+    ├─ definition.onRender(content, context)        -- your code runs here and returns its handlers
     │
     └─ ... user interacts ...
             │
             ├─ refresh button -> handlers.refresh()
-            │                    (or teardowns + full re-render when the render returned none)
+            │                    (or a fresh render, ending the previous one, when it returned none)
             ├─ menu -> handlers.onMenuSelect(action)
             ├─ lists open -> handlers.onListsOpen()
             ├─ list entry -> handlers.onListSelect(selection)
-            └─ close -> run teardowns, forget the handlers
+            └─ close -> the render's signal aborts, its teardowns run, its handlers are forgotten
 ```
 
-`singleton: true` (the default) means launching the same `type` twice focuses the existing column instead of creating a second instance; launching it with a different `entityId` re-renders it in place (running the previous render's teardowns first).
+`singleton: true` (the default) means launching the same `type` twice focuses the existing column instead of creating a second instance; launching it with a different `entityId` re-renders it in place (ending the previous render first).
 
 ## Anti-patterns
 
 - **Holding a reference to a column's content element outside its lifecycle.** It's removed from the DOM on close; references become stale. Keep references in the render's own local variables, which its handlers close over and a close releases.
-- **Subscribing to data sources / DOM events without `context.onTeardown`.** Anything that survives a close is a leak. Always register a teardown for every subscription.
-- **Talking to other columns directly.** Use `context.launchColumn(type, entityId)` — the registry resolves and the manager mounts. Reaching into another column's DOM bypasses its lifecycle.
+- **Starting work without tying it to the render.** Anything that survives a close is a leak. Pass `signal`, or register the stop with `onTeardown`.
+- **Aborting the previous query yourself on every refresh.** Take one `signalSlot()` and pass `slot.next()` to each run.
+- **Talking to other columns directly.** Use `context.launchColumn(type, entityId)` — the deck resolves and mounts. Reaching into another column's DOM bypasses its lifecycle.
 - **Keeping a render's functions or data outside the render for a header control to find later.** Return the handlers from `onRender`; they close over what they need, and a re-render replaces them.
 - **Clearing the content and mounting your own markup at the top of `onRender`.** Declare `template` and the deck mounts it for you.
 - **Waiting on something before mounting.** Mount the template, show what you can, and fill in the rest as it arrives.
-- **Loading assets manually inside `onRender`.** Pass them in the definition's `css`/`html`/`js` keys; the renderer calls `loadAssets` for you, and the asset loader (the browser default or your own) dedups per path.
+- **Loading assets manually inside `onRender`.** Pass them in the definition's `css`/`html`/`js` keys; the deck loads them before every render, and the asset loader dedups per path.
+- **Reading `data-pinned` to decide anything.** It is styling output; ask `getState()`.
+
+## Upgrading from 0.5
+
+- `trackHandle(handle)` is gone: pass `signal` to whatever started the work, or `onTeardown(() => handle.abort())`.
+- `handleSlot()` is gone: `const slot = signalSlot()`, then pass `slot.next()` to each run (or `slot.next().addEventListener("abort", () => handle.abort())` for work that only returns a handle). `slot.abort()` is unchanged.
+- `ColumnDefinition` no longer exposes `render`, `refresh`, `onMenuSelect`, `onListSelect`, `onListsOpen`, `onDestroy`, `loadAssets` or its options, and `OuterColumnContext` is no longer exported: drive a definition in tests with `openColumn` from `@innis/column-deck/testing`.
+- `Abortable`, `HandleSlot`, `ColumnLaunchFn` and `OuterColumnContext` are no longer exported; use `ColumnContext["launchColumn"]` for the launch function's type.
+- `closeColumn` returns a promise, and refuses pinned columns. `setPinned` now updates the column's chrome.
+- `onPinnedColumnsChange` no longer accepts `null`.
+- `x` closes the focused column rather than the column holding DOM focus.
+- `createBrowserAssetLoader().loadCss` rejects when the stylesheet fails to load.
+
+## Design decisions
+
+The reasons behind choices that may look surprising are recorded in [`docs/adr/`](docs/adr/).

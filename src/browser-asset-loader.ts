@@ -27,12 +27,12 @@ export const createBrowserAssetLoader = (): AssetLoader => {
 
   const loadCss = (path: string): Promise<void> =>
     loadOnce(path, () =>
-      new Promise((resolve) => {
+      new Promise((resolve, reject) => {
         const link = document.createElement("link")
         link.setAttribute("rel", "stylesheet")
         link.setAttribute("href", path)
         link.onload = (): void => resolve()
-        link.onerror = (): void => resolve()
+        link.onerror = (): void => reject(new ColumnLifecycleError(`Failed to load CSS: ${path}`))
         document.head.appendChild(link)
       }))
 

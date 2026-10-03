@@ -1,180 +1,89 @@
-import { assert, assertEquals } from "@std/assert"
+import { assertEquals } from "@std/assert"
 import { createColumnDefinition } from "../src/column-base.ts"
 import type { ListSelection } from "../src/column-base.ts"
+import { openColumn } from "../testing.ts"
 import {
   createMockAssetLoader,
   createMockElement,
-  createMockOuterContext,
+  createMockHost,
   installDocumentMock,
   removeDocumentMock,
 } from "./support/column-base-mocks.ts"
 
-Deno.test("createColumnDefinition - returns correct type and label", () => {
-  const def = createColumnDefinition({
-    type: "test-col",
-    label: "Test Column",
-    onRender: () => Promise.resolve(),
-  })
+Deno.test("createColumnDefinition - exposes its type and label", () => {
+  const def = createColumnDefinition({ type: "test-col", label: "Test Column", onRender: () => Promise.resolve() })
 
-  assertEquals(def.type, "test-col")
-  assertEquals(def.label, "Test Column")
+  assertEquals([def.type, def.label], ["test-col", "Test Column"])
 })
 
-Deno.test("createColumnDefinition - singleton defaults to true", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    onRender: () => Promise.resolve(),
-  })
+Deno.test("createColumnDefinition - returned object is frozen", () => {
+  const def = createColumnDefinition({ type: "test", label: "Test", onRender: () => Promise.resolve() })
 
-  assertEquals(def.singleton, true)
+  assertEquals(Object.isFrozen(def), true)
 })
 
-Deno.test("createColumnDefinition - singleton can be set to false", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    singleton: false,
-    onRender: () => Promise.resolve(),
-  })
-
-  assertEquals(def.singleton, false)
-})
-
-Deno.test("createColumnDefinition - hasClose defaults to true", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    onRender: () => Promise.resolve(),
-  })
-
-  assertEquals(def.hasClose, true)
-})
-
-Deno.test("createColumnDefinition - hasRefresh defaults to true", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    onRender: () => Promise.resolve(),
-  })
-
-  assertEquals(def.hasRefresh, true)
-})
-
-Deno.test("createColumnDefinition - hasLists defaults to false", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    onRender: () => Promise.resolve(),
-  })
-
-  assertEquals(def.hasLists, false)
-})
-
-Deno.test("createColumnDefinition - getTitle returns label by default", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "My Label",
-    onRender: () => Promise.resolve(),
-  })
-
-  assertEquals(def.getTitle(), "My Label")
-})
-
-Deno.test("createColumnDefinition - getTitle uses custom function when provided", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Default",
-    getTitle: (entityId) => entityId ? `Profile: ${entityId}` : "Default",
-    onRender: () => Promise.resolve(),
-  })
-
-  assertEquals(def.getTitle("abc123"), "Profile: abc123")
-  assertEquals(def.getTitle(), "Default")
-})
-
-Deno.test("createColumnDefinition - menuItems defaults to null", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    onRender: () => Promise.resolve(),
-  })
-
-  assertEquals(def.menuItems, null)
-})
-
-Deno.test("createColumnDefinition - loadAssets calls assetLoader methods for css, html, js", async () => {
-  const { loader, calls } = createMockAssetLoader()
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    css: "styles/test.css",
-    html: "templates/test.html",
-    js: "scripts/test.js",
-    onRender: () => Promise.resolve(),
-  })
-
-  await def.loadAssets(loader)
-
-  assertEquals(calls.length, 3)
-  assert(calls.some((c) => c.method === "loadCss" && c.path === "styles/test.css"))
-  assert(calls.some((c) => c.method === "loadHtml" && c.path === "templates/test.html"))
-  assert(calls.some((c) => c.method === "loadJs" && c.path === "scripts/test.js"))
-})
-
-Deno.test("createColumnDefinition - loadAssets handles array of assets", async () => {
-  const { loader, calls } = createMockAssetLoader()
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    css: ["a.css", "b.css"],
-    html: ["a.html"],
-    onRender: () => Promise.resolve(),
-  })
-
-  await def.loadAssets(loader)
-
-  assertEquals(calls.filter((c) => c.method === "loadCss").length, 2)
-  assertEquals(calls.filter((c) => c.method === "loadHtml").length, 1)
-})
-
-Deno.test("createColumnDefinition - loadAssets skips null assets", async () => {
-  const { loader, calls } = createMockAssetLoader()
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    onRender: () => Promise.resolve(),
-  })
-
-  await def.loadAssets(loader)
-
-  assertEquals(calls.length, 0)
-})
-
-Deno.test("createColumnDefinition - render calls onRender", async () => {
+Deno.test("openColumn - loads the column's css, html and js before it renders", async () => {
   installDocumentMock()
   try {
-    let renderCalled = false
-    const { loader } = createMockAssetLoader()
+    const { loader, calls } = createMockAssetLoader()
     const def = createColumnDefinition({
       type: "test",
       label: "Test",
-      onRender: () => {
-        renderCalled = true
-        return Promise.resolve()
-      },
+      css: "styles/test.css",
+      html: ["templates/a.html", "templates/b.html"],
+      js: "scripts/test.js",
+      onRender: () => Promise.resolve(),
     })
 
-    await def.loadAssets(loader)
-    await def.render(createMockElement(), createMockOuterContext())
+    await openColumn(def, createMockHost(loader), createMockElement())
 
-    assertEquals(renderCalled, true)
+    assertEquals(calls.map((call) => call.path), [
+      "styles/test.css",
+      "templates/a.html",
+      "templates/b.html",
+      "scripts/test.js",
+    ])
   } finally {
     removeDocumentMock()
   }
 })
 
-Deno.test("createColumnDefinition - onDestroy runs the render's teardowns", async () => {
+Deno.test("openColumn - a column without assets loads nothing", async () => {
+  installDocumentMock()
+  try {
+    const { loader, calls } = createMockAssetLoader()
+    const def = createColumnDefinition({ type: "test", label: "Test", onRender: () => Promise.resolve() })
+
+    await openColumn(def, createMockHost(loader), createMockElement())
+
+    assertEquals(calls.length, 0)
+  } finally {
+    removeDocumentMock()
+  }
+})
+
+Deno.test("openColumn - calls onRender with the host's entity", async () => {
+  installDocumentMock()
+  try {
+    let seen: string | null = null
+    const def = createColumnDefinition({
+      type: "test",
+      label: "Test",
+      onRender: (_el, { entityId }) => {
+        seen = entityId
+        return Promise.resolve()
+      },
+    })
+
+    await openColumn(def, { ...createMockHost(), entityId: "abc" }, createMockElement())
+
+    assertEquals(seen, "abc")
+  } finally {
+    removeDocumentMock()
+  }
+})
+
+Deno.test("openColumn - destroying the column runs the render's teardowns", async () => {
   installDocumentMock()
   try {
     let tornDown = false
@@ -189,9 +98,8 @@ Deno.test("createColumnDefinition - onDestroy runs the render's teardowns", asyn
       },
     })
 
-    const el = createMockElement()
-    await def.render(el, createMockOuterContext())
-    def.onDestroy(el)
+    const column = await openColumn(def, createMockHost(), createMockElement())
+    column.destroy()
 
     assertEquals(tornDown, true)
   } finally {
@@ -199,7 +107,7 @@ Deno.test("createColumnDefinition - onDestroy runs the render's teardowns", asyn
   }
 })
 
-Deno.test("createColumnDefinition - re-render runs the previous render's teardowns first", async () => {
+Deno.test("openColumn - a re-render runs the previous render's teardowns first", async () => {
   installDocumentMock()
   try {
     const tornDown: Array<number> = []
@@ -215,45 +123,69 @@ Deno.test("createColumnDefinition - re-render runs the previous render's teardow
       },
     })
 
-    const el = createMockElement()
-    const context = createMockOuterContext()
-    await def.render(el, context)
-    assertEquals(tornDown, [])
-    await def.render(el, context)
-    assertEquals(tornDown, [1])
-    def.onDestroy(el)
-    assertEquals(tornDown, [1, 2])
+    const column = await openColumn(def, createMockHost(), createMockElement())
+    const afterFirst = [...tornDown]
+    await column.render()
+    const afterSecond = [...tornDown]
+    column.destroy()
+
+    assertEquals([afterFirst, afterSecond, tornDown], [[], [1], [1, 2]])
   } finally {
     removeDocumentMock()
   }
 })
 
-Deno.test("createColumnDefinition - refresh re-renders when onRender returned no refresh", async () => {
+Deno.test("openColumn - a teardown registered twice runs twice", async () => {
   installDocumentMock()
   try {
-    let renderCount = 0
-    const { loader } = createMockAssetLoader()
+    let runs = 0
+    const teardown = (): void => {
+      runs++
+    }
     const def = createColumnDefinition({
       type: "test",
       label: "Test",
+      onRender: (_el, { onTeardown }) => {
+        onTeardown(teardown)
+        onTeardown(teardown)
+        return Promise.resolve()
+      },
+    })
+
+    const column = await openColumn(def, createMockHost(), createMockElement())
+    column.destroy()
+
+    assertEquals(runs, 2)
+  } finally {
+    removeDocumentMock()
+  }
+})
+
+Deno.test("openColumn - refresh re-renders, reloading assets, when onRender returned no refresh", async () => {
+  installDocumentMock()
+  try {
+    let renderCount = 0
+    const { loader, calls } = createMockAssetLoader()
+    const def = createColumnDefinition({
+      type: "test",
+      label: "Test",
+      css: "a.css",
       onRender: () => {
         renderCount++
         return Promise.resolve()
       },
     })
 
-    await def.loadAssets(loader)
-    const el = createMockElement()
-    await def.render(el, createMockOuterContext())
-    await def.refresh(el, createMockOuterContext())
+    const column = await openColumn(def, createMockHost(loader), createMockElement())
+    await column.refresh()
 
-    assertEquals(renderCount, 2)
+    assertEquals([renderCount, calls.length], [2, 2])
   } finally {
     removeDocumentMock()
   }
 })
 
-Deno.test("createColumnDefinition - a menu selection reaches the handler the render returned", async () => {
+Deno.test("openColumn - a menu selection reaches the handler the render returned", async () => {
   installDocumentMock()
   try {
     let received: string | null = null
@@ -268,9 +200,8 @@ Deno.test("createColumnDefinition - a menu selection reaches the handler the ren
         }),
     })
 
-    const el = createMockElement()
-    await def.render(el, createMockOuterContext())
-    await def.onMenuSelect(el, "sort")
+    const column = await openColumn(def, createMockHost(), createMockElement())
+    await column.onMenuSelect("sort")
 
     assertEquals(received, "sort")
   } finally {
@@ -278,7 +209,7 @@ Deno.test("createColumnDefinition - a menu selection reaches the handler the ren
   }
 })
 
-Deno.test("createColumnDefinition - a list selection reaches the handler the render returned", async () => {
+Deno.test("openColumn - a list selection reaches the handler the render returned", async () => {
   installDocumentMock()
   try {
     let received: string | null = null
@@ -293,9 +224,8 @@ Deno.test("createColumnDefinition - a list selection reaches the handler the ren
         }),
     })
 
-    const el = createMockElement()
-    await def.render(el, createMockOuterContext())
-    await def.onListSelect(el, { action: "add", btn: null })
+    const column = await openColumn(def, createMockHost(), createMockElement())
+    await column.onListSelect({ action: "add", btn: null })
 
     assertEquals(received, "add")
   } finally {
@@ -303,24 +233,7 @@ Deno.test("createColumnDefinition - a list selection reaches the handler the ren
   }
 })
 
-Deno.test("createColumnDefinition - returned object is frozen", () => {
-  const def = createColumnDefinition({
-    type: "test",
-    label: "Test",
-    onRender: () => Promise.resolve(),
-  })
-
-  assertEquals(Object.isFrozen(def), true)
-})
-
-Deno.test("createColumnDefinition - hasPin defaults to true and can be disabled", () => {
-  const withPin = createColumnDefinition({ type: "a", label: "A", onRender: () => Promise.resolve() })
-  const withoutPin = createColumnDefinition({ type: "b", label: "B", hasPin: false, onRender: () => Promise.resolve() })
-  assertEquals(withPin.hasPin, true)
-  assertEquals(withoutPin.hasPin, false)
-})
-
-Deno.test("createColumnDefinition - opening the list selector calls the handler the render returned", async () => {
+Deno.test("openColumn - opening the list selector calls the handler the render returned", async () => {
   installDocumentMock()
   try {
     let opened = false
@@ -335,9 +248,8 @@ Deno.test("createColumnDefinition - opening the list selector calls the handler 
         }),
     })
 
-    const el = createMockElement()
-    await def.render(el, createMockOuterContext())
-    await def.onListsOpen(el)
+    const column = await openColumn(def, createMockHost(), createMockElement())
+    await column.onListsOpen()
 
     assertEquals(opened, true)
   } finally {
@@ -345,16 +257,16 @@ Deno.test("createColumnDefinition - opening the list selector calls the handler 
   }
 })
 
-Deno.test("createColumnDefinition - a header control whose handler the render did not return does nothing", async () => {
+Deno.test("openColumn - a header control whose handler the render did not return does nothing", async () => {
   installDocumentMock()
   try {
     const def = createColumnDefinition({ type: "test", label: "Test", onRender: () => Promise.resolve({}) })
 
     const el = createMockElement()
-    await def.render(el, createMockOuterContext())
-    await def.onMenuSelect(el, "sort")
-    await def.onListSelect(el, { action: "add", btn: null })
-    await def.onListsOpen(el)
+    const column = await openColumn(def, createMockHost(), el)
+    await column.onMenuSelect("sort")
+    await column.onListSelect({ action: "add", btn: null })
+    await column.onListsOpen()
 
     assertEquals(Reflect.get(el, "children").length, 1)
   } finally {

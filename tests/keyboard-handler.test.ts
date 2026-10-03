@@ -68,7 +68,6 @@ const installDocumentStub = (): DocumentStub => {
   return {
     press: (key, modifiers = {}) => {
       let prevented = false
-      // deno-lint-ignore innis/no-type-assertions
       const event = {
         key,
         ctrlKey: false,
@@ -92,11 +91,10 @@ const installDocumentStub = (): DocumentStub => {
   }
 }
 
-const makeColumn = (key: string, options: { readonly pinned?: boolean } = {}): HTMLElement => {
+const makeColumn = (key: string): HTMLElement => {
   const column = document.createElement("article")
   column.setAttribute("data-column", "")
   column.dataset.columnKey = key
-  if (options.pinned) column.dataset.pinned = ""
   column.innerHTML = "<header><h2></h2></header><div data-content></div>"
   return column
 }
@@ -140,13 +138,10 @@ const makeHarness = (
   const stub = installDocumentStub()
   const handler = createKeyboardHandler({
     containerElement: container,
-    getLastFocusedElement: () => focusedIndex === null ? null : columns[focusedIndex] ?? null,
+    getFocusedColumnElement: () => focusedIndex === null ? null : columns[focusedIndex] ?? null,
     onFocusColumn: (key) => calls.focused.push(key),
     onUndo: () => calls.undone++,
-    onMoveColumn: (key, direction) => {
-      calls.moved.push({ key, direction })
-      return true
-    },
+    onMoveColumn: (key, direction) => calls.moved.push({ key, direction }),
     onClose: (key) => calls.closed.push(key),
     onRefresh: (key) => calls.refreshed.push(key),
     ...options.deps,
@@ -247,42 +242,30 @@ Deno.test("createKeyboardHandler - Ctrl+Z and Cmd+Z trigger undo; plain z does n
   })
 })
 
-Deno.test("createKeyboardHandler - x closes the unpinned column that contains the active element", () => {
-  withHarness({}, ({ stub, columns, calls }) => {
-    const heading = columns[0]?.querySelector("h2")
-    if (!(heading instanceof HTMLElement)) throw new Error("heading missing")
-    stub.setActiveElement(heading)
-    stub.press("x")
-    assertEquals(calls.closed, ["a"])
+Deno.test("createKeyboardHandler - x closes the focused column", () => {
+  withHarness({ focusedColumn: 1 }, ({ stub, calls }) => {
+    const { prevented } = stub.press("x")
+    assertEquals([prevented, calls.closed], [true, ["b"]])
   })
 })
 
-Deno.test("createKeyboardHandler - x closes the column holding focus even when another column was focused last", () => {
-  withHarness({ focusedColumn: 0 }, ({ stub, columns, calls }) => {
-    const heading = columns[1]?.querySelector("h2")
-    if (!(heading instanceof HTMLElement)) throw new Error("heading missing")
-    stub.setActiveElement(heading)
+Deno.test("createKeyboardHandler - x and r act on the same column", () => {
+  withHarness({ focusedColumn: 2 }, ({ stub, calls }) => {
     stub.press("x")
-    assertEquals(calls.closed, ["b"])
+    stub.press("r")
+    assertEquals([calls.closed, calls.refreshed], [["c"], ["c"]])
   })
 })
 
 Deno.test("createKeyboardHandler - Ctrl+X does not close the column", () => {
-  withHarness({}, ({ stub, columns, calls }) => {
-    const heading = columns[0]?.querySelector("h2")
-    if (!(heading instanceof HTMLElement)) throw new Error("heading missing")
-    stub.setActiveElement(heading)
+  withHarness({}, ({ stub, calls }) => {
     stub.press("x", { ctrlKey: true })
     assertEquals(calls.closed, [])
   })
 })
 
-Deno.test("createKeyboardHandler - x is ignored for pinned columns and columns without focus", () => {
-  const columns = [makeColumn("a", { pinned: true }), makeColumn("b")]
-  withHarness({ columns }, ({ stub, columns: [pinned], calls }) => {
-    const heading = pinned?.querySelector("h2")
-    if (!(heading instanceof HTMLElement)) throw new Error("heading missing")
-    stub.setActiveElement(heading)
+Deno.test("createKeyboardHandler - x does nothing when no column is focused", () => {
+  withHarness({ focusedColumn: null }, ({ stub, calls }) => {
     stub.press("x")
     assertEquals(calls.closed, [])
   })

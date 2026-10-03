@@ -4,10 +4,11 @@ import {
   createColumn,
   createColumnState,
   findColumn,
-  getPinnedCount,
-  insertColumnAfter,
+  insertColumn,
+  pinnedColumns,
   removeColumn,
   reorderColumns,
+  replaceColumn,
   setColumnPinned,
   setLastFocused,
 } from "../src/column-state.ts"
@@ -80,24 +81,24 @@ Deno.test("addColumn - preserves existing columns", () => {
   assertEquals(newState.columns[1]?.key, "notifications")
 })
 
-Deno.test("insertColumnAfter - inserts after specified key", () => {
+Deno.test("insertColumn - after a key inserts directly behind it", () => {
   const col1 = createColumn({ type: "feed" })
   const col2 = createColumn({ type: "notifications" })
   const col3 = createColumn({ type: "profile", entityId: "abc" })
   let state = addColumn(createColumnState(), col1)
   state = addColumn(state, col2)
-  const newState = insertColumnAfter(state, col3, "feed")
+  const newState = insertColumn(state, col3, { after: "feed" })
   assertEquals(newState.columns.length, 3)
   assertEquals(newState.columns[0]?.key, "feed")
   assertEquals(newState.columns[1]?.key, "profile:abc")
   assertEquals(newState.columns[2]?.key, "notifications")
 })
 
-Deno.test("insertColumnAfter - appends when key not found", () => {
+Deno.test("insertColumn - after a key that is not open appends", () => {
   const col1 = createColumn({ type: "feed" })
   const col2 = createColumn({ type: "profile", entityId: "abc" })
   const state = addColumn(createColumnState(), col1)
-  const newState = insertColumnAfter(state, col2, "nonexistent")
+  const newState = insertColumn(state, col2, { after: "nonexistent" })
   assertEquals(newState.columns.length, 2)
   assertEquals(newState.columns[0]?.key, "feed")
   assertEquals(newState.columns[1]?.key, "profile:abc")
@@ -216,23 +217,36 @@ Deno.test("setColumnPinned - does not affect other columns", () => {
   assertEquals(newState.columns[1]?.pinned, false)
 })
 
-Deno.test("getPinnedCount - returns zero for no pinned columns", () => {
-  const col = createColumn({ type: "feed" })
-  const state = addColumn(createColumnState(), col)
-  assertEquals(getPinnedCount(state), 0)
+Deno.test("insertColumn - first puts the column at the head", () => {
+  const state = addColumn(createColumnState(), createColumn({ type: "feed" }))
+  const newState = insertColumn(state, createColumn({ type: "search" }), "first")
+  assertEquals(newState.columns.map((c) => c.key), ["search", "feed"])
 })
 
-Deno.test("getPinnedCount - counts pinned columns correctly", () => {
+Deno.test("insertColumn - last puts the column at the end", () => {
+  const state = addColumn(createColumnState(), createColumn({ type: "feed" }))
+  const newState = insertColumn(state, createColumn({ type: "search" }), "last")
+  assertEquals(newState.columns.map((c) => c.key), ["feed", "search"])
+})
+
+Deno.test("pinnedColumns - returns none when nothing is pinned", () => {
+  const state = addColumn(createColumnState(), createColumn({ type: "feed" }))
+  assertEquals(pinnedColumns(state), [])
+})
+
+Deno.test("pinnedColumns - returns the pinned columns in order", () => {
   const col1 = createColumn({ type: "feed", pinned: true })
   const col2 = createColumn({ type: "notifications" })
   const col3 = createColumn({ type: "search", pinned: true })
-  let state = addColumn(createColumnState(), col1)
-  state = addColumn(state, col2)
-  state = addColumn(state, col3)
-  assertEquals(getPinnedCount(state), 2)
+  const state = [col1, col2, col3].reduce(addColumn, createColumnState())
+  assertEquals(pinnedColumns(state).map((c) => c.key), ["feed", "search"])
 })
 
-Deno.test("getPinnedCount - returns zero for empty state", () => {
-  const state = createColumnState()
-  assertEquals(getPinnedCount(state), 0)
+Deno.test("replaceColumn - swaps the column with the same key in place", () => {
+  const state = [createColumn({ type: "feed" }), createColumn({ type: "search" })].reduce(
+    addColumn,
+    createColumnState(),
+  )
+  const rebound = { ...createColumn({ type: "feed", entityId: "x", singleton: true }) }
+  assertEquals(replaceColumn(state, rebound).columns.map((c) => [c.key, c.entityId]), [["feed", "x"], ["search", null]])
 })

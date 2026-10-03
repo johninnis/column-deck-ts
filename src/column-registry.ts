@@ -1,23 +1,18 @@
 import type { ColumnDefinition, ColumnServices } from "./column-base.ts"
 
 interface ColumnRegistry<S extends ColumnServices = ColumnServices> {
-  readonly register: (type: string, definition: ColumnDefinition<S>) => void
   readonly get: (type: string) => ColumnDefinition<S> | null
   readonly has: (type: string) => boolean
 }
 
-const createColumnRegistry = <S extends ColumnServices = ColumnServices>(): ColumnRegistry<S> => {
-  const columns = new Map<string, ColumnDefinition<S>>()
-
-  const register = (type: string, definition: ColumnDefinition<S>): void => {
-    columns.set(type, definition)
-  }
-
-  const get = (type: string): ColumnDefinition<S> | null => columns.get(type) ?? null
-
-  const has = (type: string): boolean => columns.has(type)
-
-  return Object.freeze({ register, get, has })
+const createColumnRegistry = <S extends ColumnServices>(
+  definitions: ReadonlyArray<ColumnDefinition<S>>,
+): ColumnRegistry<S> => {
+  const byType: ReadonlyMap<string, ColumnDefinition<S>> = new Map(definitions.map((d) => [d.type, d]))
+  return Object.freeze({
+    get: (type: string): ColumnDefinition<S> | null => byType.get(type) ?? null,
+    has: (type: string): boolean => byType.has(type),
+  })
 }
 
 export type { ColumnRegistry }

@@ -1,3 +1,5 @@
+import type { DropTarget } from "./column-layout.ts"
+import type { ColumnKey } from "./column-state.ts"
 import { getColumnKeyFromElement } from "./column-dom.ts"
 
 interface DragHandler {
@@ -7,32 +9,25 @@ interface DragHandler {
 
 interface DragHandlerDeps {
   readonly containerElement: HTMLElement
-  readonly onReorder: (fromIndex: number, toIndex: number) => void
+  readonly onDragOver: (key: ColumnKey, target: DropTarget) => void
   readonly isMobile: () => boolean
 }
 
-const createDragHandler = ({ containerElement, onReorder, isMobile }: DragHandlerDeps): DragHandler => {
-  let draggedElement: HTMLElement | null = null
-  let originalIndex: number | null = null
+const columnOf = (target: EventTarget | null): HTMLElement | null =>
+  target instanceof HTMLElement ? target.closest<HTMLElement>("[data-column]") : null
 
-  const getColumnElements = (): ReadonlyArray<HTMLElement> =>
-    Array.from(containerElement.querySelectorAll<HTMLElement>("[data-column]"))
-
-  const getColumnIndex = (element: HTMLElement): number => getColumnElements().indexOf(element)
+const createDragHandler = ({ containerElement, onDragOver, isMobile }: DragHandlerDeps): DragHandler => {
+  let dragged: { readonly element: HTMLElement; readonly key: ColumnKey } | null = null
 
   const handleDragStart = (event: DragEvent): void => {
     if (isMobile()) return
+    const element = columnOf(event.target)
+    const key = element ? getColumnKeyFromElement(element) : null
+    if (!element || key === null) return
 
-    if (!(event.target instanceof HTMLElement)) return
-    const column = event.target.closest<HTMLElement>("[data-column]")
-    if (!column) return
-
-    draggedElement = column
-    originalIndex = getColumnIndex(column)
-    column.dataset.dragging = ""
-
-    const key = getColumnKeyFromElement(column)
-    if (event.dataTransfer && key !== null) {
+    dragged = { element, key }
+    element.dataset.dragging = ""
+    if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move"
       event.dataTransfer.setData("text/plain", key)
     }
@@ -40,39 +35,22 @@ const createDragHandler = ({ containerElement, onReorder, isMobile }: DragHandle
 
   const handleDragOver = (event: DragEvent): void => {
     event.preventDefault()
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "move"
-    }
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move"
+    if (!dragged) return
 
-    if (!draggedElement) return
-
-    if (!(event.target instanceof HTMLElement)) return
-    const targetColumn = event.target.closest<HTMLElement>("[data-column]")
-    if (!targetColumn || targetColumn === draggedElement) return
-    if (targetColumn.dataset.pinned !== undefined) return
+    const targetColumn = columnOf(event.target)
+    const targetKey = targetColumn ? getColumnKeyFromElement(targetColumn) : null
+    if (!targetColumn || targetKey === null || targetKey === dragged.key) return
 
     const rect = targetColumn.getBoundingClientRect()
-    const midpoint = rect.left + rect.width / 2
-
-    if (event.clientX < midpoint) {
-      containerElement.insertBefore(draggedElement, targetColumn)
-    } else {
-      containerElement.insertBefore(draggedElement, targetColumn.nextSibling)
-    }
+    const side = event.clientX < rect.left + rect.width / 2 ? "before" : "after"
+    onDragOver(dragged.key, { key: targetKey, side })
   }
 
   const handleDragEnd = (): void => {
-    if (!draggedElement) return
-
-    delete draggedElement.dataset.dragging
-    const newIndex = getColumnIndex(draggedElement)
-
-    if (originalIndex !== null && originalIndex !== newIndex) {
-      onReorder(originalIndex, newIndex)
-    }
-
-    draggedElement = null
-    originalIndex = null
+    if (!dragged) return
+    delete dragged.element.dataset.dragging
+    dragged = null
   }
 
   const attach = (): void => {

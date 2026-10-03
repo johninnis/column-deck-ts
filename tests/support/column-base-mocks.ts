@@ -1,8 +1,8 @@
-import type { AssetLoader, OuterColumnContext } from "../../src/column-base.ts"
+import type { AssetLoader } from "../../src/column-base.ts"
+import type { ColumnHost } from "../../testing.ts"
 
 export const createMockElement = (): HTMLElement => {
   const children: Array<unknown> = []
-  // deno-lint-ignore innis/no-type-assertions
   return {
     querySelector: () => null,
     appendChild: (child: unknown) => {
@@ -17,10 +17,12 @@ export const createMockElement = (): HTMLElement => {
   } as unknown as HTMLElement
 }
 
-export const createMockAssetLoader = (): {
-  loader: AssetLoader
-  calls: ReadonlyArray<{ method: string; path: string }>
-} => {
+export interface MockAssetLoader {
+  readonly loader: AssetLoader
+  readonly calls: ReadonlyArray<{ method: string; path: string }>
+}
+
+export const createMockAssetLoader = (): MockAssetLoader => {
   const calls: Array<{ method: string; path: string }> = []
   return {
     loader: {
@@ -36,14 +38,13 @@ export const createMockAssetLoader = (): {
         calls.push({ method: "loadJs", path })
         return Promise.resolve()
       },
-      // deno-lint-ignore innis/no-type-assertions
       cloneTemplate: (id: string) => ({ id } as unknown as DocumentFragment),
     },
     calls,
   }
 }
 
-export const createMockOuterContext = (): OuterColumnContext => ({
+export const createMockHost = (assetLoader: AssetLoader = createMockAssetLoader().loader): ColumnHost => ({
   entityId: null,
   launchColumn: () => Promise.resolve("col-1"),
   updateTitle: () => {},
@@ -51,8 +52,7 @@ export const createMockOuterContext = (): OuterColumnContext => ({
   updateListItems: () => {},
   updateHeaderStatus: () => {},
   close: () => {},
-  // deno-lint-ignore innis/no-type-assertions
-  cloneTemplate: (id: string) => ({ id } as unknown as DocumentFragment),
+  assetLoader,
   services: {},
 })
 

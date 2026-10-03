@@ -1,111 +1,122 @@
-import type { Column, ColumnKey, ColumnRef, ColumnState } from "./column-state.ts"
+import type { Column, ColumnKey, ColumnRef } from "./column-state.ts"
+import type { ColumnStore } from "./column-store.ts"
+import type { ColumnRenderer } from "./column-renderer.ts"
+import type { DeckLayout } from "./deck-layout.ts"
 import type { MobileStack, StackChange, SuspendedEntry } from "./column-mobile-stack.ts"
-import { addColumn, createColumnState } from "./column-state.ts"
-import { clearStack, historyOf, popTop, seedStack, suspendOnto, unwindTo } from "./column-mobile-stack.ts"
+import { clearStack, historyOf, seedStack, suspendOnto, unwindTo } from "./column-mobile-stack.ts"
+import { popLast } from "./immutable-list.ts"
+
+interface MobileHistory {
+  readonly initial: ReadonlyArray<ColumnRef>
+  readonly onChange: (() => void) | undefined
+}
 
 interface MobileNavigatorDeps {
-  readonly getState: () => ColumnState
-  readonly setState: (state: ColumnState) => void
-  readonly initialHistory: ReadonlyArray<ColumnRef>
-  readonly createColumn: (type: string, entityId: string | null) => Column
-  readonly renderColumn: (column: Column, shouldScroll?: boolean) => Promise<HTMLElement>
-  readonly suspendColumn: (column: Column) => number
-  readonly restoreColumn: (column: Column, scrollTop: number) => void
-  readonly destroyColumns: (columns: ReadonlyArray<Column>) => void
-  readonly closeAllColumns: () => void
-  readonly focusColumn: (key: ColumnKey) => void
-  readonly onMobileHistoryChange?: (() => void) | undefined
+  readonly store: ColumnStore
+  readonly layout: DeckLayout
+  readonly renderer: ColumnRenderer
+  readonly columnFor: (ref: ColumnRef) => Column
+  readonly history: MobileHistory
 }
 
 interface MobileNavigator {
-  readonly navigateTo: (type: string, entityId: string | null) => Promise<string>
+  readonly navigateTo: (ref: ColumnRef) => Promise<string>
   readonly goBack: () => Promise<void>
+  readonly close: (key: ColumnKey) => Promise<void>
   readonly getHistory: () => ReadonlyArray<ColumnRef>
   readonly destroy: () => void
 }
 
 const createMobileNavigator = (
-  {
-    getState,
-    setState,
-    initialHistory,
-    createColumn,
-    renderColumn,
-    suspendColumn,
-    restoreColumn,
-    destroyColumns,
-    closeAllColumns,
-    focusColumn,
-    onMobileHistoryChange,
-  }: MobileNavigatorDeps,
+  { store, layout, renderer, columnFor, history }: MobileNavigatorDeps,
 ): MobileNavigator => {
-  let stack: MobileStack = seedStack(initialHistory)
+  let stack: MobileStack = seedStack(history.initial)
+
+  const current = (): Column | undefined => store.get().columns[0]
 
   const apply = (change: StackChange): void => {
-    destroyColumns(change.destroyed)
+    renderer.destroy(change.destroyed)
     stack = change.stack
   }
 
   const presented = (column: Column): string => {
-    focusColumn(column.key)
-    onMobileHistoryChange?.()
+    renderer.focus(column.key)
+    history.onChange?.()
     return column.key
   }
 
-  const show = async (column: Column, shouldScroll: boolean): Promise<string> => {
-    setState(addColumn(getState(), column))
-    const rendered = renderColumn(column, shouldScroll)
+  const show = async (column: Column): Promise<string> => {
+    layout.open(column, "last")
+    const rendered = renderer.render(column)
     const key = presented(column)
     await rendered
     return key
   }
 
   const restore = ({ column, scrollTop }: SuspendedEntry): string => {
-    setState(addColumn(getState(), column))
-    restoreColumn(column, scrollTop)
+    layout.reattach(column, scrollTop)
     return presented(column)
   }
 
   const suspendCurrent = (): void => {
-    const current = getState().columns[0]
-    if (!current) return
-    const scrollTop = suspendColumn(current)
-    setState(createColumnState())
-    apply(suspendOnto(stack, current, scrollTop))
+    const column = current()
+    if (!column) return
+    apply(suspendOnto(stack, column, layout.detach(column.key)))
   }
 
-  const navigateTo = (type: string, entityId: string | null): Promise<string> => {
-    const column = createColumn(type, entityId)
+  const closeCurrent = (): void => {
+    const column = current()
+    if (column) layout.remove(column.key)
+  }
+
+  const replaceCurrent = (column: Column): Promise<string> => {
+    closeCurrent()
+    return show(column)
+  }
+
+  const navigateTo = (ref: ColumnRef): Promise<string> => {
+    const column = columnFor(ref)
+    const showing = current()
+    if (showing?.key === column.key) {
+      if (showing.entityId === ref.entityId) return Promise.resolve(presented(showing))
+      return replaceCurrent(column)
+    }
     const unwound = unwindTo(stack, column.key)
     if (!unwound) {
       suspendCurrent()
-      return show(column, true)
+      return show(column)
     }
-    closeAllColumns()
+    closeCurrent()
     apply(unwound)
-    if (unwound.target.column.entityId === entityId) return Promise.resolve(restore(unwound.target))
-    destroyColumns([unwound.target.column])
-    return show(column, true)
+    if (unwound.target.column.entityId === ref.entityId) return Promise.resolve(restore(unwound.target))
+    renderer.destroy([unwound.target.column])
+    return show(column)
   }
 
   const goBack = async (): Promise<void> => {
-    const popped = popTop(stack)
+    const popped = popLast(stack)
     if (!popped) return
-    closeAllColumns()
-    stack = popped.stack
-    if (popped.entry.kind === "suspended") {
-      restore(popped.entry)
+    closeCurrent()
+    stack = popped.rest
+    if (popped.last.kind === "suspended") {
+      restore(popped.last)
       return
     }
-    await show(createColumn(popped.entry.type, popped.entry.entityId), false)
+    await show(columnFor(popped.last))
+  }
+
+  const close = async (key: ColumnKey): Promise<void> => {
+    if (current()?.key !== key) return
+    if (stack.length > 0) await goBack()
+    else closeCurrent()
   }
 
   const getHistory = (): ReadonlyArray<ColumnRef> => historyOf(stack)
 
   const destroy = (): void => apply(clearStack(stack))
 
-  return Object.freeze({ navigateTo, goBack, getHistory, destroy })
+  return Object.freeze({ navigateTo, goBack, close, getHistory, destroy })
 }
 
-export type { MobileNavigator, MobileNavigatorDeps }
+export type { MobileHistory, MobileNavigator, MobileNavigatorDeps }
 export { createMobileNavigator }

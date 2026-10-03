@@ -1,16 +1,13 @@
 import { assertEquals } from "@std/assert"
-import { type ClosedColumnsHistory, recordClosed, takeLastClosed } from "../src/column-history.ts"
+import { type ClosedColumnsHistory, recordClosed } from "../src/column-history.ts"
+import { popLast } from "../src/immutable-list.ts"
 
-Deno.test("takeLastClosed returns null for an empty history", () => {
-  assertEquals(takeLastClosed([]), null)
-})
-
-Deno.test("recordClosed appends and takeLastClosed returns entries in LIFO order without mutating", () => {
+Deno.test("recordClosed appends without mutating, so the last entry is the latest close", () => {
   const first = { type: "feed", entityId: null, afterKey: null }
   const second = { type: "profile", entityId: "abc", afterKey: "feed" }
-  const history = recordClosed(recordClosed([], first), second)
-  const taken = takeLastClosed(history)
-  assertEquals([taken?.entry, takeLastClosed(taken?.history ?? [])?.entry, history.length], [second, first, 2])
+  const once = recordClosed([], first)
+  const history = recordClosed(once, second)
+  assertEquals([popLast(history)?.last, once.length, history.length], [second, 1, 2])
 })
 
 Deno.test("recordClosed caps the history at 50 entries, dropping the oldest", () => {

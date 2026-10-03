@@ -9,12 +9,6 @@ const query = <T extends Element>(root: ParentNode, selector: string, type: { ne
   return el
 }
 
-/**
- * Resolves the element that actually scrolls within a column's content area.
- * Columns whose content is not itself scrollable (e.g. chat columns, where an
- * inner messages container scrolls) mark the scroller with `data-scroll-region`;
- * all other columns scroll the content element directly.
- */
 const resolveScrollRegion = (content: HTMLElement): HTMLElement => {
   const region = content.querySelector("[data-scroll-region]")
   return region instanceof HTMLElement ? region : content
@@ -69,28 +63,30 @@ const populateDropdown = (
   })
 }
 
-interface ColumnShellParams {
-  readonly shellTemplate: ShellTemplate
+interface ShellChrome {
   readonly title: string
-  readonly hasClose?: boolean
-  readonly hasRefresh?: boolean
-  readonly hasLists?: boolean
-  readonly hasPin?: boolean
-  readonly menuItems?: ReadonlyArray<MenuItem> | null
-  readonly onClose?: () => void
-  readonly onRefresh?: () => void
-  readonly onMenuSelect?: (action: string) => void
-  readonly onListSelect?: (action: string, btn: HTMLButtonElement | null) => void
-  readonly onListsOpen?: () => void
-  readonly onFocus?: () => void
-  readonly onPinChange?: (pinned: boolean) => void
-  readonly scrollContainer?: HTMLElement | null
+  readonly hasClose: boolean
+  readonly hasRefresh: boolean
+  readonly hasLists: boolean
+  readonly hasPin: boolean
+  readonly menuItems: ReadonlyArray<MenuItem> | null
+}
+
+interface ShellEvents {
+  readonly onClose: () => void
+  readonly onRefresh: () => void
+  readonly onMenuSelect: (action: string) => void
+  readonly onListSelect: (action: string, btn: HTMLButtonElement | null) => void
+  readonly onListsOpen: () => void
+  readonly onTogglePin: () => void
+  readonly onFocus: () => void
+  readonly onHeaderWheel: (deltaY: number) => void
 }
 
 interface ColumnShell {
   readonly element: HTMLElement
   readonly getContentElement: () => HTMLElement
-  readonly setPinned: (value: boolean, options?: { readonly notify?: boolean }) => void
+  readonly renderPinned: (pinned: boolean) => void
   readonly updateTitle: (newTitle: string) => void
   readonly updateMenuItems: (items: ReadonlyArray<MenuItem>) => void
   readonly updateListItems: (items: ReadonlyArray<MenuItem>) => void
@@ -98,23 +94,7 @@ interface ColumnShell {
   readonly destroy: () => void
 }
 
-const createColumnShell = ({
-  shellTemplate,
-  title,
-  hasClose = true,
-  hasRefresh = true,
-  hasLists = false,
-  hasPin = true,
-  menuItems = null,
-  onClose = () => {},
-  onRefresh = () => {},
-  onMenuSelect = () => {},
-  onListSelect = () => {},
-  onListsOpen = () => {},
-  onFocus = () => {},
-  onPinChange = () => {},
-  scrollContainer = null,
-}: ColumnShellParams): ColumnShell => {
+const createColumnShell = (shellTemplate: ShellTemplate, chrome: ShellChrome, events: ShellEvents): ColumnShell => {
   const fragment = shellTemplate()
   const firstChild = fragment.firstElementChild
   if (!(firstChild instanceof HTMLElement)) {
@@ -124,7 +104,7 @@ const createColumnShell = ({
   const abortController = new AbortController()
 
   const titleEl = query(shell, "[data-title]", HTMLElement)
-  titleEl.textContent = title
+  titleEl.textContent = chrome.title
 
   const menuWrapper = query(shell, "[data-menu-wrapper]", HTMLElement)
   const listsWrapper = query(shell, "[data-lists-wrapper]", HTMLElement)
@@ -146,11 +126,11 @@ const createColumnShell = ({
   const updateMenuItems = (items: ReadonlyArray<MenuItem>): void =>
     populateDropdown(menu.list, items, (item) => {
       setDropdownOpen(menu, false)
-      onMenuSelect(item.action)
+      events.onMenuSelect(item.action)
     })
 
   const updateListItems = (items: ReadonlyArray<MenuItem>): void =>
-    populateDropdown(lists.list, items, (item, btn) => onListSelect(item.action, btn))
+    populateDropdown(lists.list, items, (item, btn) => events.onListSelect(item.action, btn))
 
   const updateTitle = (newTitle: string): void => {
     titleEl.textContent = newTitle
@@ -177,72 +157,67 @@ const createColumnShell = ({
     document.addEventListener("click", () => setDropdownOpen(dropdown, false), { signal: abortController.signal })
   }
 
-  if (menuItems === null) {
+  if (chrome.menuItems === null) {
     menuWrapper.remove()
   } else {
-    updateMenuItems(menuItems)
+    updateMenuItems(chrome.menuItems)
     wireDropdownToggle(menu, lists, () => {})
   }
 
-  if (hasLists) {
-    wireDropdownToggle(lists, menu, onListsOpen)
+  if (chrome.hasLists) {
+    wireDropdownToggle(lists, menu, events.onListsOpen)
   } else {
     listsWrapper.remove()
   }
 
-  if (hasRefresh) {
-    refreshBtn.addEventListener("click", onRefresh)
+  if (chrome.hasRefresh) {
+    refreshBtn.addEventListener("click", events.onRefresh)
   } else {
     refreshBtn.remove()
   }
 
-  if (hasClose) {
-    closeBtn.addEventListener("click", onClose)
+  if (chrome.hasClose) {
+    closeBtn.addEventListener("click", events.onClose)
   } else {
     closeBtn.remove()
   }
 
-  let pinned = false
-  const setPinned = (value: boolean, { notify = true }: { readonly notify?: boolean } = {}): void => {
-    pinned = value
-    closeBtn.hidden = pinned
-    header.setAttribute("draggable", String(!pinned))
+  const renderPinned = (pinned: boolean): void => {
+    closeBtn.toggleAttribute("hidden", pinned)
+    header.setAttribute("draggable", String(chrome.hasPin && !pinned))
     if (pinned) {
       shell.dataset.pinned = ""
     } else {
       delete shell.dataset.pinned
     }
-    if (notify) onPinChange(pinned)
   }
 
-  if (hasPin) {
-    pinBtn.addEventListener("click", () => setPinned(!pinned))
+  if (chrome.hasPin) {
+    pinBtn.addEventListener("click", events.onTogglePin)
   } else {
     pinBtn.remove()
     header.setAttribute("draggable", "false")
   }
 
   header.addEventListener("auxclick", (e: MouseEvent) => {
-    if (e.button === 1 && !pinned) {
-      e.preventDefault()
-      onClose()
-    }
+    if (e.button !== 1) return
+    e.preventDefault()
+    events.onClose()
   })
 
   header.addEventListener("wheel", (e: WheelEvent) => {
-    if (scrollContainer && e.deltaY !== 0) {
-      e.preventDefault()
-      scrollContainer.scrollLeft += e.deltaY
-    }
+    if (e.deltaY === 0) return
+    e.preventDefault()
+    events.onHeaderWheel(e.deltaY)
   }, { passive: false })
 
   header.addEventListener("dblclick", () => {
     resolveScrollRegion(content).scrollTo({ top: 0, behavior: scrollBehaviour() })
   })
 
-  shell.addEventListener("click", onFocus)
-  shell.addEventListener("focusin", onFocus)
-  content.addEventListener("scroll", onFocus, { passive: true })
+  shell.addEventListener("click", events.onFocus)
+  shell.addEventListener("focusin", events.onFocus)
+  content.addEventListener("scroll", events.onFocus, { passive: true })
 
   const destroy = (): void => {
     abortController.abort()
@@ -251,7 +226,7 @@ const createColumnShell = ({
   return Object.freeze({
     element: shell,
     getContentElement: (): HTMLElement => content,
-    setPinned,
+    renderPinned,
     updateTitle,
     updateMenuItems,
     updateListItems,
@@ -260,5 +235,5 @@ const createColumnShell = ({
   })
 }
 
-export type { ColumnShell, ColumnShellParams }
+export type { ColumnShell, ShellChrome, ShellEvents }
 export { createColumnShell, resolveScrollRegion }

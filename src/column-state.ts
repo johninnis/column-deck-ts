@@ -20,7 +20,8 @@ interface ColumnState {
   readonly lastFocusedKey: ColumnKey | null
 }
 
-/** Inputs for creating a {@linkcode Column}; the key is derived from `type`, `entityId`, and `singleton`. */
+type ColumnPlacement = "first" | "last" | { readonly after: ColumnKey }
+
 interface CreateColumnParams {
   readonly type: string
   readonly entityId?: string | null
@@ -52,20 +53,22 @@ const addColumn = (state: ColumnState, column: Column): ColumnState => ({
   columns: [...state.columns, column],
 })
 
-const insertColumnAfter = (state: ColumnState, column: Column, afterKey: ColumnKey): ColumnState => {
-  const index = state.columns.findIndex((c) => c.key === afterKey)
-  if (index === -1) {
-    return addColumn(state, column)
-  }
-  const columns = [...state.columns]
-  columns.splice(index + 1, 0, column)
-  return { ...state, columns }
+const insertColumn = (state: ColumnState, column: Column, placement: ColumnPlacement): ColumnState => {
+  if (placement === "first") return { ...state, columns: [column, ...state.columns] }
+  const index = placement === "last" ? -1 : state.columns.findIndex((c) => c.key === placement.after)
+  if (index === -1) return addColumn(state, column)
+  return { ...state, columns: state.columns.toSpliced(index + 1, 0, column) }
 }
 
 const removeColumn = (state: ColumnState, key: ColumnKey): ColumnState => ({
   ...state,
   columns: state.columns.filter((c) => c.key !== key),
   lastFocusedKey: state.lastFocusedKey === key ? null : state.lastFocusedKey,
+})
+
+const replaceColumn = (state: ColumnState, column: Column): ColumnState => ({
+  ...state,
+  columns: state.columns.map((c) => c.key === column.key ? column : c),
 })
 
 const reorderColumns = (state: ColumnState, fromIndex: number, toIndex: number): ColumnState => {
@@ -90,19 +93,17 @@ const setColumnPinned = (state: ColumnState, key: ColumnKey, pinned: boolean): C
 
 const pinnedColumns = (state: ColumnState): ReadonlyArray<Column> => state.columns.filter((c) => c.pinned)
 
-const getPinnedCount = (state: ColumnState): number => pinnedColumns(state).length
-
-export type { Column, ColumnKey, ColumnRef, ColumnState, CreateColumnParams }
+export type { Column, ColumnKey, ColumnPlacement, ColumnRef, ColumnState, CreateColumnParams }
 export {
   addColumn,
   createColumn,
   createColumnState,
   findColumn,
-  getPinnedCount,
-  insertColumnAfter,
+  insertColumn,
   pinnedColumns,
   removeColumn,
   reorderColumns,
+  replaceColumn,
   setColumnPinned,
   setLastFocused,
 }
