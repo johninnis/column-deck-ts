@@ -59,12 +59,13 @@ interface ColumnDeckDeps<S extends ColumnServices = ColumnServices> {
 
 /** The running column deck: launch, close, refresh, undo, back navigation, pinning, state inspection (including the focused column's element, for host-side keyboard handling inside a column), and teardown. */
 interface ColumnDeck {
-  readonly launchColumn: (type: string, entityId?: string | null) => Promise<string>
+  readonly launchColumn: (type: string, entityId?: string | null, placement?: ColumnPlacement) => Promise<string>
   readonly closeColumn: (key: ColumnKey) => Promise<void>
   readonly refreshColumn: (key: ColumnKey) => Promise<void>
   readonly undo: () => Promise<void>
   readonly goBack: () => Promise<void>
   readonly getState: () => ColumnState
+  readonly getLastFocusedKey: () => ColumnKey | null
   readonly getColumnCount: () => number
   readonly getFocusedColumnElement: () => HTMLElement | null
   readonly getMobileHistory: () => ReadonlyArray<ColumnRef>
@@ -117,7 +118,7 @@ const createColumnDeck = async <S extends ColumnServices = ColumnServices>({
 
   const hostFor = (column: Column, shell: ColumnShell): ColumnHost<S> => ({
     entityId: column.entityId,
-    launchColumn: (type, entityId = null) => launchColumn(type, entityId, column.key),
+    launchColumn: (type, entityId = null) => launchColumn({ type, entityId, spawnedFrom: column.key }),
     updateTitle: shell.updateTitle,
     updateMenuItems: shell.updateMenuItems,
     updateListItems: shell.updateListItems,
@@ -175,13 +176,25 @@ const createColumnDeck = async <S extends ColumnServices = ColumnServices>({
     return opened.key
   }
 
-  const launchColumn = async (
-    type: string,
-    entityId: string | null,
+  const resolveLaunchPlacement = (
     spawnedFrom: ColumnKey | null,
-  ): Promise<string> => {
+    placement: ColumnPlacement | undefined,
+  ): ColumnPlacement => {
+    if (placement === undefined) return placementAfter(store.get(), spawnedFrom, "last")
+    if (typeof placement === "object") return placementAfter(store.get(), placement.after, "last")
+    return placement
+  }
+
+  interface LaunchArgs {
+    readonly type: string
+    readonly entityId: string | null
+    readonly spawnedFrom: ColumnKey | null
+    readonly placement?: ColumnPlacement | undefined
+  }
+
+  const launchColumn = async ({ type, entityId, spawnedFrom, placement }: LaunchArgs): Promise<string> => {
     if (isMobile()) return mobile.navigateTo({ type, entityId })
-    return launch({ type, entityId }, placementAfter(store.get(), spawnedFrom, "last"))
+    return launch({ type, entityId }, resolveLaunchPlacement(spawnedFrom, placement))
   }
 
   const closeColumn = async (key: ColumnKey): Promise<void> => {
@@ -288,12 +301,14 @@ const createColumnDeck = async <S extends ColumnServices = ColumnServices>({
   }
 
   return Object.freeze({
-    launchColumn: (type: string, entityId: string | null = null) => launchColumn(type, entityId, null),
+    launchColumn: (type: string, entityId: string | null = null, placement?: ColumnPlacement) =>
+      launchColumn({ type, entityId, spawnedFrom: null, placement }),
     closeColumn,
     refreshColumn,
     undo,
     goBack: mobile.goBack,
     getState: store.get,
+    getLastFocusedKey: () => store.get().lastFocusedKey,
     getColumnCount: () => store.get().columns.length,
     getFocusedColumnElement,
     getMobileHistory: mobile.getHistory,

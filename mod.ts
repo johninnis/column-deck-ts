@@ -16,7 +16,7 @@ export type {
   SignalSlot,
 } from "./src/column-base.ts"
 
-export type { Column, ColumnKey, ColumnRef, ColumnState } from "./src/column-state.ts"
+export type { Column, ColumnKey, ColumnPlacement, ColumnRef, ColumnState } from "./src/column-state.ts"
 
 export { createColumnDeck } from "./src/column-deck.ts"
 export type { ColumnAssetPaths, ColumnDeck, ColumnDeckDeps } from "./src/column-deck.ts"

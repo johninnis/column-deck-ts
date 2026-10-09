@@ -101,13 +101,13 @@ Returns a `ColumnDeck`:
 
 | Member | What it does |
 | --- | --- |
-| `launchColumn(type, entityId?)` | Opens a column, or focuses it when one with the same key is open (a singleton showing another entity re-renders with the new one). Resolves with the column key once it has rendered. Rejects with `ColumnLifecycleError` for an unregistered type, before any state changes. |
+| `launchColumn(type, entityId?, placement?)` | Opens a column, or focuses it when one with the same key is open (a singleton showing another entity re-renders with the new one). Without `placement` the column opens last; pass `"first"`, `"last"` or `{ after: key }` to place it (an `after` key inside the pinned region resolves to the region's end, a missing key falls back to last). Resolves with the column key once it has rendered. Rejects with `ColumnLifecycleError` for an unregistered type, before any state changes. |
 | `closeColumn(key)` | Closes a column, running its teardowns. A pinned column is not closed. On mobile, closing the current column goes back to the previous one. |
 | `refreshColumn(key)` | Runs the `refresh` the column's render returned, or renders it again. |
 | `undo()` | Re-opens the last closed column where it was (up to fifty are remembered). |
 | `goBack()` | Pops the mobile back-stack. |
 | `setPinned(key, pinned)` | Pins or unpins a column: moves it in or out of the pinned region at the head of the deck and updates its chrome. |
-| `getState()`, `getColumnCount()` | The current layout. |
+| `getState()`, `getColumnCount()`, `getLastFocusedKey()` | The current layout, and the key of the column last clicked, focused or scrolled (null when none). |
 | `getFocusedColumnElement()` | The focused column's element, so the host can bind keys that act inside a column. |
 | `getMobileHistory()` | The mobile back-stack, read-only. |
 | `destroy()` | Closes every open and suspended column, running their teardowns, and detaches the drag and keyboard handlers and observers. |
@@ -220,7 +220,7 @@ column.destroy()
 
 ### State — `column-state.ts`
 
-`ColumnKey = string` (`type` for singleton columns, `type:entityId` otherwise — singletons keep their bare `type` key even when bound to an entity). `getState()` returns a plain, immutable `{ columns, lastFocusedKey }` snapshot; each `Column` carries `type`, `entityId`, `key`, `spawnedFrom` and `pinned`.
+`ColumnKey = string` (`type` for singleton columns, `type:entityId` otherwise — singletons keep their bare `type` key even when bound to an entity). `getState()` returns a plain, immutable `{ columns, lastFocusedKey }` snapshot; each `Column` carries `type`, `entityId`, `key`, `spawnedFrom` and `pinned`. `ColumnPlacement = "first" | "last" | { after: ColumnKey }` names a slot in that layout for `launchColumn`.
 
 ### Drag + keyboard
 

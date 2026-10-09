@@ -92,6 +92,57 @@ Deno.test("createColumnDeck - a column launched from another opens directly afte
   deck.destroy()
 })
 
+Deno.test("createColumnDeck - launchColumn with an explicit placement opens the column after the given key", async () => {
+  const { deck, mountElement } = await makeDeck()
+  await deck.launchColumn("feed")
+  await deck.launchColumn("widget")
+  await deck.launchColumn("note", "child", { after: "feed" })
+  assertEquals(
+    [deck.getState().columns.map((c) => c.key), keysInDom(mountElement)],
+    [["feed", "note:child", "widget"], ["feed", "note:child", "widget"]],
+  )
+  deck.destroy()
+})
+
+Deno.test("createColumnDeck - launchColumn with an explicit placement after a missing key falls back to the end", async () => {
+  const { deck } = await makeDeck()
+  await deck.launchColumn("feed")
+  await deck.launchColumn("note", "child", { after: "missing" })
+  assertEquals(deck.getState().columns.map((c) => c.key), ["feed", "note:child"])
+  deck.destroy()
+})
+
+Deno.test("createColumnDeck - launchColumn with an explicit placement never opens inside the pinned region", async () => {
+  const { deck } = await makeDeck()
+  await deck.launchColumn("note", "a")
+  await deck.launchColumn("note", "b")
+  deck.setPinned("note:a", true)
+  deck.setPinned("note:b", true)
+  await deck.launchColumn("widget", null, { after: "note:a" })
+  assertEquals(deck.getState().columns.map((c) => c.key), ["note:a", "note:b", "widget"])
+  deck.destroy()
+})
+
+Deno.test("createColumnDeck - launchColumn with a head placement opens the column first", async () => {
+  const { deck } = await makeDeck()
+  await deck.launchColumn("feed")
+  await deck.launchColumn("widget", null, "first")
+  assertEquals(deck.getState().columns.map((c) => c.key), ["widget", "feed"])
+  deck.destroy()
+})
+
+Deno.test("createColumnDeck - getLastFocusedKey tracks the column last interacted with", async () => {
+  const { deck, mountElement } = await makeDeck()
+  await deck.launchColumn("feed")
+  await deck.launchColumn("note", "a")
+  assertEquals(deck.getLastFocusedKey(), null)
+  dispatch(columnElement(mountElement, "feed"), "click")
+  assertEquals(deck.getLastFocusedKey(), "feed")
+  dispatch(columnElement(mountElement, "note:a"), "focusin")
+  assertEquals(deck.getLastFocusedKey(), "note:a")
+  deck.destroy()
+})
+
 Deno.test("createColumnDeck - closeColumn removes the column, runs its teardowns and persists", async () => {
   const { deck, store, teardowns } = await makeDeck()
   const key = await deck.launchColumn("feed")

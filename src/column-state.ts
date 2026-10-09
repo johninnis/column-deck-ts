@@ -20,6 +20,7 @@ interface ColumnState {
   readonly lastFocusedKey: ColumnKey | null
 }
 
+/** Where a launched column lands in the layout: at the head, at the end, or directly after another column. */
 type ColumnPlacement = "first" | "last" | { readonly after: ColumnKey }
 
 interface CreateColumnParams {
